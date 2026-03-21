@@ -1,0 +1,38 @@
+# .htaccess - Place in root directory
+
+# Enable rewrite engine
+RewriteEngine On
+
+# Redirect all requests to index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    
+    # HSTS (uncomment if using HTTPS)
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# Disable directory browsing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "(config\.php|\.sql|\.env|composer\.json|composer\.lock)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# PHP settings
+<IfModule mod_php.c>
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+    php_value max_execution_time 30
+    php_value memory_limit 128M
+</IfModule>
