@@ -29,7 +29,6 @@ class FranchiseController extends Controller{
                 lh.id as histID,
                 f.FranchiseNo,
                 f.ApplicantID,
-                f.Driver,
                 lh.DateIssued,
                 f.Route,
                 f.MakeID,
@@ -45,7 +44,6 @@ class FranchiseController extends Controller{
                 lh.ExpiryDate,
                 tblH.ExpiryDate as LatestExpiryDate,
                 CONCAT(a.FirstName,' ',a.LastName) as ApplicantName,
-                a.Gender,
                 a.ContactNo,
                 a.Address,
                 m.Name as MakeName,
@@ -89,9 +87,9 @@ class FranchiseController extends Controller{
         if ($search) {
             $sql .= " AND (f.FranchiseNo LIKE ? OR lh.PlateNo LIKE ? OR lh.ORNo LIKE ? OR a.Address LIKE ? OR 
                     a.ContactNo LIKE ? OR lh.DateIssued LIKE ? OR f.ChassisNo LIKE ? OR f.EngineNo LIKE ? OR 
-                    lh.DropReason LIKE ? OR lh.ExpiryDate LIKE ? OR f.LastRenewalDate LIKE ? OR f.Driver LIKE ? OR a.FirstName LIKE ? OR a.LastName LIKE ?)";
+                    lh.DropReason LIKE ? OR lh.ExpiryDate LIKE ? OR f.LastRenewalDate LIKE ? OR a.FirstName LIKE ? OR a.LastName LIKE ?)";
             $searchParam = "%{$search}%";
-            for ($i = 0; $i < 14; $i++) {
+            for ($i = 0; $i < 13; $i++) {
                 $params[] = $searchParam;
             }
         }
@@ -183,7 +181,6 @@ class FranchiseController extends Controller{
             $id = Database::insert('franchises', [
                 'ApplicantID' => $data['ApplicantID'],
                 'FranchiseNo' => $data['FranchiseNo'],
-                'Driver' => $data['Driver'] ?? null,
                 'DateIssued' => $data['DateIssued'],
                 'Route' => $data['Route'],
                 'MakeID' => $data['MakeID'],
@@ -265,7 +262,7 @@ class FranchiseController extends Controller{
         
         // Build update data
         $updateData = [];
-        $allowedFields = ['FranchiseNo', 'Driver', 'DateIssued', 'Route', 'MakeID', 'ChassisNo', 'EngineNo', 'PlateNo', 'ORNo', 'Amount', 'ExpiryDate'];
+        $allowedFields = ['FranchiseNo', 'DateIssued', 'Route', 'MakeID', 'ChassisNo', 'EngineNo', 'PlateNo', 'ORNo', 'Amount', 'ExpiryDate'];
         
         if($existing['Status'] == 'drop'){
             $allowedFields = ['DropReason'];
@@ -732,9 +729,7 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $franchiseNo = strtoupper((string)($franchise['FranchiseNo'] ?? ''));
         $dateIssued = !empty($lastHistory['DateIssued']) ? date('F j, Y', strtotime((string)$lastHistory['DateIssued'])) : '';
-        $expiryDate = !empty($lastHistory['ExpiryDate']) ? date('F j, Y', strtotime((string)$lastHistory['ExpiryDate'])) : '';
         $applicantName = strtoupper((string)($franchise['ApplicantName'] ?? ''));
-        $applicantGender = $this->normalizeGenderLabel($franchise['Gender'] ?? null);
         $address = strtoupper((string)($franchise['Address'] ?? ''));
         $route = strtoupper((string)($lastHistory['Route'] ?? ''));
         $make = strtoupper((string)($franchise['MakeName'] ?? ''));
@@ -750,9 +745,7 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $franchiseNoDisplay = $this->escapePdfValue($franchiseNo);
         $dateIssuedDisplay = $this->escapePdfValue($dateIssued);
-        $expiryDateDisplay = $this->escapePdfValue($expiryDate);
         $applicantNameDisplay = $this->escapePdfValue($applicantName);
-        $applicantGenderDisplay = $this->escapePdfValue($applicantGender);
         $addressDisplay = $this->escapePdfValue($address);
         $routeDisplay = $this->escapePdfValue($route);
         $makeDisplay = $this->escapePdfValue($make);
@@ -797,12 +790,12 @@ public function exportFranchiseForm(?string $id = null): void {
             $table = '
                 <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse: collapse;border-width:1px;">
                     <tr>
-                        <td width="30%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:11pt;text-align: left;">NAME OF APPLICANT</td>
-                        <td width="45%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:14pt;text-align: left;">' . $applicantNameDisplay . '</td>
+                        <td width="40%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:11pt;text-align: left;">NAME OF APPLICANT</td>
+                        <td width="60%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:14pt;text-align: left;">' . $applicantNameDisplay . '</td>
                     </tr>
                     <tr>
-                        <td width="30%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:11pt;text-align: left;">ADDRESS</td>
-                        <td width="70%" colspan="3" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:12pt;text-align: left;">' . $addressDisplay . '</td>
+                        <td width="40%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:11pt;text-align: left;">ADDRESS</td>
+                        <td width="60%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:12pt;text-align: left;">' . $addressDisplay . '</td>
                     </tr>
                     <tr>
                         <td width="40%" style="padding: 5px 10px;border: 1px solid #000;font-weight: bold;font-size:10.5pt;text-align: left;">ROUTE / ZONE / AREA  OF OPERATION</td>
@@ -949,10 +942,6 @@ public function exportFranchiseForm(?string $id = null): void {
                                     <td width="25%" style="border: none;font-weight: normal;font-size:8pt;text-align: left;">Date</td>
                                     <td width="75%" style="padding-left:5px;border: none;font-weight: normal;font-size:8pt;text-align: left;">:&nbsp;' . $dateIssuedDisplay . '</td>
                                 </tr>
-                                <tr>
-                                    <td width="25%" style="border: none;font-weight: normal;font-size:8pt;text-align: left;">Expire Date</td>
-                                    <td width="75%" style="padding-left:5px;border: none;font-weight: normal;font-size:8pt;text-align: left;">:&nbsp;' . $expiryDateDisplay . '</td>
-                                </tr>
                             </table>
                         </td>
                         <td width="50%" style="border: none;font-weight: normal;font-size:11pt;text-align: left;">&nbsp;</td>
@@ -982,7 +971,6 @@ public function exportFranchiseForm(?string $id = null): void {
         $reportTypeRaw = (string)($_GET['report_type'] ?? 'report');
         $reportType = $this->normalizeReportType($reportTypeRaw, $status);
         $window = $this->normalizeExpiringWindow((int)($_GET['window'] ?? $this->extractExpiringWindowFromReportType($reportTypeRaw)));
-        $genderFilter = $this->normalizeGenderExportFilter($_GET['gender_filter'] ?? 'all');
         $startDate = $this->normalizeOptionalDate($_GET['start_date'] ?? null);
         $endDate = $this->normalizeOptionalDate($_GET['end_date'] ?? null);
 
@@ -1003,33 +991,33 @@ public function exportFranchiseForm(?string $id = null): void {
         try {
             switch ($reportType) {
                 case 'summaryByRoute':
-                    $rows = $this->filterRowsByGender($this->getFranchisesForRouteSummary((string)$startDate, (string)$endDate), $genderFilter);
+                    $rows = $this->getFranchisesForRouteSummary((string)$startDate, (string)$endDate);
                     $this->generateSummaryByRoutePDF($rows, (string)$startDate, (string)$endDate);
                     return;
 
                 case 'activeHolders':
-                    $rows = $this->filterRowsByGender($this->getActiveFranchisesForExport($startDate, $endDate), $genderFilter);
+                    $rows = $this->getActiveFranchisesForExport($startDate, $endDate);
                     $this->generateFranchisePDF($rows, $startDate, $endDate, 'active', 'activeHolders');
                     return;
 
                 case 'expiring':
-                    $rows = $this->filterRowsByGender($this->getExpiringFranchisesForExport($window), $genderFilter);
+                    $rows = $this->getExpiringFranchisesForExport($window);
                     $this->generateExpiringFranchisesPDF($rows, $window);
                     return;
 
                 case 'droppedMasterlist':
-                    $rows = $this->filterRowsByGender($this->getDroppedFranchisesForExport($startDate, $endDate), $genderFilter);
+                    $rows = $this->getDroppedFranchisesForExport($startDate, $endDate);
                     $this->generateDroppedMasterlistPDF($rows, $startDate, $endDate);
                     return;
 
                 case 'perHolderSummary':
-                    $rows = $this->filterRowsByGender($this->getPerHolderSummaryForExport($startDate, $endDate), $genderFilter);
+                    $rows = $this->getPerHolderSummaryForExport($startDate, $endDate);
                     $this->generatePerHolderSummaryPDF($rows, $startDate, $endDate);
                     return;
 
                 case 'report':
                 default:
-                    $rows = $this->filterRowsByGender($this->getFranchisesForExport((string)$startDate, (string)$endDate, $status), $genderFilter);
+                    $rows = $this->getFranchisesForExport((string)$startDate, (string)$endDate, $status);
                     $this->generateFranchisePDF($rows, (string)$startDate, (string)$endDate, $status, 'report');
                     return;
             }
@@ -1227,7 +1215,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 f.ApplicantID,
                 COALESCE(NULLIF(fh.Route, ''), f.Route) AS Route,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 f.FranchiseNo,
                 COALESCE(NULLIF(fh.PlateNo, ''), f.PlateNo) AS PlateNo,
@@ -1289,9 +1276,7 @@ public function exportFranchiseForm(?string $id = null): void {
                 f.id AS FranchiseID,
                 f.ApplicantID,
                 f.FranchiseNo,
-                f.Driver,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 a.ContactNo,
                 COALESCE(NULLIF(fh.PlateNo, ''), f.PlateNo) AS PlateNo,
@@ -1365,9 +1350,7 @@ public function exportFranchiseForm(?string $id = null): void {
                 f.id AS FranchiseID,
                 f.ApplicantID,
                 f.FranchiseNo,
-                f.Driver,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 a.ContactNo,
                 COALESCE(NULLIF(ah.PlateNo, ''), NULLIF(lh.PlateNo, ''), f.PlateNo) AS PlateNo,
@@ -1392,13 +1375,15 @@ public function exportFranchiseForm(?string $id = null): void {
         $today = date('Y-m-d');
 
         if ($startDate) {
+            $effectiveStartDate = max($today, $startDate);
+
             if ($endDate) {
                 $sql .= " AND ah.ExpiryDate BETWEEN ? AND ?";
-                $params[] = $startDate;
+                $params[] = $effectiveStartDate;
                 $params[] = $endDate;
             } else {
                 $sql .= " AND ah.ExpiryDate >= ?";
-                $params[] = $startDate;
+                $params[] = $effectiveStartDate;
             }
         } else {
             $sql .= " AND ah.ExpiryDate >= ?";
@@ -1433,7 +1418,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 f.ApplicantID,
                 f.FranchiseNo,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 a.ContactNo,
                 COALESCE(NULLIF(dh.PlateNo, ''), NULLIF(ah.PlateNo, ''), f.PlateNo) AS PlateNo,
@@ -1491,7 +1475,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 f.ApplicantID,
                 f.FranchiseNo,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 a.ContactNo,
                 COALESCE(NULLIF(ah.PlateNo, ''), NULLIF(lh.PlateNo, ''), f.PlateNo) AS PlateNo,
@@ -1556,7 +1539,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 lh.id AS LatestHistoryID,
                 a.id AS ApplicantID,
                 {$nameSql} AS Name,
-                a.Gender,
                 a.Address,
                 a.ContactNo,
                 f.id AS FranchiseID,
@@ -1605,7 +1587,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 $grouped[$applicantId] = [
                     'ApplicantID' => $row['ApplicantID'],
                     'Name' => $row['Name'] ?? '',
-                    'Gender' => $this->normalizeGenderLabel($row['Gender'] ?? null),
                     'Address' => $row['Address'] ?? '',
                     'ContactNo' => $row['ContactNo'] ?? '',
                     'ActiveUnitCount' => 0,
@@ -1649,7 +1630,6 @@ public function exportFranchiseForm(?string $id = null): void {
             return [
                 'ApplicantID' => $item['ApplicantID'],
                 'Name' => $item['Name'],
-                'Gender' => $item['Gender'],
                 'Address' => $item['Address'],
                 'ContactNo' => $item['ContactNo'],
                 'ActiveUnitCount' => $item['ActiveUnitCount'],
@@ -1667,93 +1647,6 @@ public function exportFranchiseForm(?string $id = null): void {
         });
 
         return $result;
-    }
-
-
-    private function normalizeGenderExportFilter(mixed $gender): string {
-        $value = strtoupper(trim((string)($gender ?? 'all')));
-
-        return match ($value) {
-            'M', 'MALE' => 'M',
-            'F', 'FEMALE' => 'F',
-            default => 'all',
-        };
-    }
-
-    private function filterRowsByGender(array $rows, string $genderFilter = 'all'): array {
-        $normalizedFilter = $this->normalizeGenderExportFilter($genderFilter);
-        if ($normalizedFilter === 'all') {
-            return $rows;
-        }
-
-        return array_values(array_filter($rows, function (array $row) use ($normalizedFilter): bool {
-            return $this->normalizeGenderLabel($row['Gender'] ?? null) === $normalizedFilter;
-        }));
-    }
-
-    private function buildOperatorCellHtml(array $item): string {
-        $name = trim((string)($item['Name'] ?? ''));
-        $driver = trim((string)($item['Driver'] ?? ''));
-
-        $html = $this->escapePdfValue($name !== '' ? $name : '-');
-        if ($driver !== '') {
-            $html .= '<br><span style="font-size: 9px;">(Driver: ' . $this->escapePdfValue($driver) . ')</span>';
-        }
-
-        return $html;
-    }
-
-    private function normalizeGenderLabel(mixed $gender): string {
-        $value = strtoupper(trim((string)($gender ?? '')));
-
-        return match ($value) {
-            'M' => 'M',
-            'F' => 'F',
-            default => '',
-        };
-    }
-
-    private function calculateGenderCounts(array $rows, bool $uniqueByApplicant = true): array {
-        $counts = ['male' => 0, 'female' => 0];
-        $seenApplicants = [];
-
-        foreach ($rows as $row) {
-            if ($uniqueByApplicant) {
-                $applicantId = trim((string)($row['ApplicantID'] ?? ''));
-                if ($applicantId !== '') {
-                    if (isset($seenApplicants[$applicantId])) {
-                        continue;
-                    }
-
-                    $seenApplicants[$applicantId] = true;
-                }
-            }
-
-            $gender = $this->normalizeGenderLabel($row['Gender'] ?? null);
-
-            if ($gender === 'M') {
-                $counts['male']++;
-            } elseif ($gender === 'F') {
-                $counts['female']++;
-            }
-        }
-
-        return $counts;
-    }
-
-    private function buildGenderSummaryText(array $rows, bool $uniqueByApplicant = true, string $labelPrefix = 'Total'): string {
-        $counts = $this->calculateGenderCounts($rows, $uniqueByApplicant);
-        $parts = [];
-
-        if ($counts['male'] > 0) {
-            $parts[] = $labelPrefix . ' Male: ' . $counts['male'];
-        }
-
-        if ($counts['female'] > 0) {
-            $parts[] = $labelPrefix . ' Female: ' . $counts['female'];
-        }
-
-        return $parts ? ' | ' . implode(' | ', $parts) : '';
     }
 
     private function formatStatusLabel(string $rawStatus, ?string $expiryDate = null, bool $considerExpired = true): string {
@@ -2063,16 +1956,16 @@ public function exportFranchiseForm(?string $id = null): void {
         $isActiveReport = ($reportType === 'activeHolders');
         $title = $isActiveReport ? 'ACTIVE FRANCHISE HOLDERS REPORT' : 'MTOP FRANCHISE REPORT';
         $activeReportStartDate = $isActiveReport
-            ? ($startDate ?: date('Y-m-d'))
+            ? ($startDate ? max(date('Y-m-d'), $startDate) : date('Y-m-d'))
             : null;
         $dateFilterLabel = $isActiveReport
             ? $this->buildOptionalDateRangeLabel($activeReportStartDate, $endDate, 'From ' . date('F j, Y'))
             : $this->buildDateRangeLabel((string)$startDate, (string)$endDate);
         $subtitle = $isActiveReport
-            ? 'Franchise records filtered using franchise expiry date'
+            ? 'Current active franchise records (not dropped and not yet expired)'
             : $dateFilterLabel;
         $filterLabel = $isActiveReport
-            ? 'ACTIVE / EXPIRY DATE FILTER'
+            ? 'ACTIVE (NOT DROPPED AND NOT YET EXPIRED)'
             : match ($statusFilter) {
                 'drop' => 'DROPPED',
                 'renew' => 'RENEW',
@@ -2083,39 +1976,35 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $pdf = $this->createPdfDocument($title, 'Generated Franchise Report');
 
-        $genderSummary = $this->buildGenderSummaryText($franchises, true, 'Total');
-
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . $this->escapePdfValue($title) . '</p>',
             '<p class="subtitle">' . $this->escapePdfValue($subtitle) . '</p>',
-            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:12%;">OPERATOR</th>
-                <th style="width:4%;">GENDER</th>
-                <th style="width:12%;">ADDRESS</th>
+                <th style="width:13%;">OPERATOR</th>
+                <th style="width:14%;">ADDRESS</th>
                 <th style="width:8%;">FRANCHISE NO.</th>
                 <th style="width:7%;">DATE ISSUED</th>
                 <th style="width:7%;">EXPIRY DATE</th>
                 <th style="width:9%;">ROUTE</th>
                 <th style="width:7%;">MAKE</th>
-                <th style="width:8%;">ENGINE NO.</th>
-                <th style="width:8%;">CHASSIS NO.</th>
+                <th style="width:9%;">ENGINE NO.</th>
+                <th style="width:9%;">CHASSIS NO.</th>
                 <th style="width:7%;">PLATE NO.</th>
-                <th style="width:6%;">STATUS</th>
+                <th style="width:7%;">STATUS</th>
             </tr></thead><tbody>',
         ]);
 
         if (empty($franchises)) {
-            $pdf->WriteHTML('<tr><td colspan="13" style="text-align:center;">No franchise records found for the selected filter.</td></tr>');
+            $pdf->WriteHTML('<tr><td colspan="12" style="text-align:center;">No franchise records found for the selected filter.</td></tr>');
         } else {
             $rowHtml = [];
             foreach ($franchises as $index => $item) {
                 $rowHtml[] = '<tr>
                     <td style="text-align:center;">' . ($index + 1) . '</td>
-                    <td>' . ($isActiveReport ? $this->buildOperatorCellHtml($item) : $this->escapePdfValue(strtoupper((string)($item['Name'] ?? '')))) . '</td>
-                    <td style="text-align:center;">' . $this->escapePdfValue($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
+                    <td>' . $this->escapePdfValue(strtoupper((string)($item['Name'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['Address'] ?? ''))) . '</td>
                     <td style="text-align:center;"><strong>' . $this->escapePdfValue((string)($item['FranchiseNo'] ?? '')) . '</strong></td>
                     <td style="text-align:center;">' . $this->escapePdfValue((string)($item['DateIssued'] ?? '')) . '</td>
@@ -2147,18 +2036,15 @@ public function exportFranchiseForm(?string $id = null): void {
         $subtitle = 'Current active franchise units expiring between ' . date('F j, Y') . ' and ' . date('F j, Y', strtotime('+' . $window . ' days'));
         $pdf = $this->createPdfDocument($title, 'Generated Expiring Franchises Report');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
-
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             '<p class="subtitle">' . htmlspecialchars($subtitle) . '</p>',
-            '<p class="meta">Total Records: ' . count($rows) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Total Records: ' . count($rows) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:13%;">OPERATOR</th>
-                <th style="width:5%;">GENDER</th>
-                <th style="width:13%;">ADDRESS</th>
+                <th style="width:14%;">OPERATOR</th>
+                <th style="width:14%;">ADDRESS</th>
                 <th style="width:8%;">FRANCHISE NO.</th>
                 <th style="width:8%;">EXPIRY DATE</th>
                 <th style="width:6%;">DAYS LEFT</th>
@@ -2174,7 +2060,6 @@ public function exportFranchiseForm(?string $id = null): void {
             $rowHtml[] = '<tr>
                 <td style="text-align:center;">' . ($index + 1) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Name'] ?? ''))) . '</td>
-                <td style="text-align:center;">' . htmlspecialchars($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Address'] ?? ''))) . '</td>
                 <td style="text-align:center;"><strong>' . htmlspecialchars((string)($item['FranchiseNo'] ?? '')) . '</strong></td>
                 <td style="text-align:center;">' . htmlspecialchars((string)($item['ExpiryDate'] ?? '')) . '</td>
@@ -2208,18 +2093,15 @@ public function exportFranchiseForm(?string $id = null): void {
         $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
         $pdf = $this->createPdfDocument($title, 'Generated Dropped Franchises Report');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
-
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             '<p class="subtitle">' . htmlspecialchars($subtitle) . '</p>',
-            '<p class="meta">Total Records: ' . count($rows) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Total Records: ' . count($rows) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:12%;">OPERATOR</th>
-                <th style="width:4%;font-size: 10px;">GENDER</th>
-                <th style="width:10%;">ADDRESS</th>
+                <th style="width:13%;">OPERATOR</th>
+                <th style="width:11%;">ADDRESS</th>
                 <th style="width:8%;">FRANCHISE NO.</th>
                 <th style="width:9%;">ROUTE</th>
                 <th style="width:6%;">MAKE</th>
@@ -2227,7 +2109,7 @@ public function exportFranchiseForm(?string $id = null): void {
                 <th style="width:7%;">DATE ISSUED</th>
                 <th style="width:7%;">LAST EXPIRY</th>
                 <th style="width:7%;">DATE DROPPED</th>
-                <th style="width:20%;">DROP REASON</th>
+                <th style="width:22%;">DROP REASON</th>
             </tr></thead><tbody>',
         ]);
 
@@ -2236,7 +2118,6 @@ public function exportFranchiseForm(?string $id = null): void {
             $rowHtml[] = '<tr>
                 <td style="text-align:center;">' . ($index + 1) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Name'] ?? ''))) . '</td>
-                <td style="text-align:center;">' . htmlspecialchars($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Address'] ?? ''))) . '</td>
                 <td style="text-align:center;"><strong>' . htmlspecialchars((string)($item['FranchiseNo'] ?? '')) . '</strong></td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Route'] ?? ''))) . '</td>
@@ -2275,23 +2156,20 @@ public function exportFranchiseForm(?string $id = null): void {
         $dateFilterLabel = $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
         $pdf = $this->createPdfDocument($title, 'Generated Per Holder Franchise Summary');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
-
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             // '<p class="meta">Total Active Units: ' . $totalActiveUnits . ' | Date Filter: ' . htmlspecialchars($dateFilterLabel) . '</p>',
-            '<p class="meta">Date Filter: ' . htmlspecialchars($dateFilterLabel) . htmlspecialchars($genderSummary) . '</p>',
+            '<p class="meta">Date Filter: ' . htmlspecialchars($dateFilterLabel) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:15%;">OPERATOR</th>
-                <th style="width:5%;">GENDER</th>
-                <th style="width:16%;">ADDRESS</th>
-                <th style="width:8%;">CONTACT NO.</th>
+                <th style="width:16%;">OPERATOR</th>
+                <th style="width:18%;">ADDRESS</th>
+                <th style="width:9%;">CONTACT NO.</th>
                 <th style="width:6%;">ACTIVE UNITS</th>
                 <th style="width:14%;">FRANCHISE NOS.</th>
                 <th style="width:11%;">PLATE NOS.</th>
-                <th style="width:14%;">ROUTES</th>
+                <th style="width:15%;">ROUTES</th>
                 <th style="width:8%;">NEAREST EXPIRY</th>
             </tr></thead><tbody>',
         ]);
@@ -2301,7 +2179,6 @@ public function exportFranchiseForm(?string $id = null): void {
             $rowHtml[] = '<tr>
                 <td style="text-align:center;">' . ($index + 1) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Name'] ?? ''))) . '</td>
-                <td style="text-align:center;">' . htmlspecialchars($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
                 <td>' . htmlspecialchars(strtoupper((string)($item['Address'] ?? ''))) . '</td>
                 <td>' . htmlspecialchars((string)($item['ContactNo'] ?? '')) . '</td>
                 <td style="text-align:center;">' . (int)($item['ActiveUnitCount'] ?? 0) . '</td>
@@ -2334,8 +2211,6 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $dateRangeString = $this->buildDateRangeLabel($startDate, $endDate);
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
-
         $summary = [];
         $grand = ['new' => 0, 'renew' => 0, 'total' => 0];
 
@@ -2365,7 +2240,6 @@ public function exportFranchiseForm(?string $id = null): void {
             $this->getSharedReportStyles(),
             '<p class="report-title">SUMMARY OF FRANCHISES BY ROUTE</p>',
             '<p class="subtitle">' . htmlspecialchars($dateRangeString) . '</p>',
-            '<p class="meta">' . htmlspecialchars($genderSummary) . '</p>',
             '<div class="section-title">OVERALL SUMMARY</div>',
             '<table class="overall-table"><thead><tr>
                 <th style="text-align:left;">ROUTE</th>
@@ -2411,16 +2285,15 @@ public function exportFranchiseForm(?string $id = null): void {
 
             $pdf->WriteHTML('<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:11%;">OPERATOR</th>
-                <th style="width:4%;">GENDER</th>
-                <th style="width:13%;">ADDRESS</th>
+                <th style="width:12%;">OPERATOR</th>
+                <th style="width:14%;">ADDRESS</th>
                 <th style="width:7%;">FRANCHISE NO.</th>
                 <th style="width:7%;">DATE ISSUED</th>
                 <th style="width:7%;">EXPIRY</th>
                 <th style="width:6%;">PLATE</th>
                 <th style="width:6%;">MAKE</th>
-                <th style="width:9%;">ENGINE NO.</th>
-                <th style="width:9%;">CHASSIS NO.</th>
+                <th style="width:10%;">ENGINE NO.</th>
+                <th style="width:10%;">CHASSIS NO.</th>
                 <th style="width:7%;">OR NO.</th>
                 <th style="width:6%;">AMOUNT</th>
                 <th style="width:5%;">STATUS</th>
@@ -2444,7 +2317,6 @@ public function exportFranchiseForm(?string $id = null): void {
                 $routeRowHtml[] = '<tr>
                     <td style="text-align:center;">' . ($index + 1) . '</td>
                     <td>' . htmlspecialchars(strtoupper((string)($row['Name'] ?? ''))) . '</td>
-                    <td style="text-align:center;">' . htmlspecialchars($this->normalizeGenderLabel($row['Gender'] ?? null)) . '</td>
                     <td>' . htmlspecialchars(strtoupper((string)($row['Address'] ?? ''))) . '</td>
                     <td style="text-align:center;"><strong>' . htmlspecialchars((string)($row['FranchiseNo'] ?? '')) . '</strong></td>
                     <td style="text-align:center;">' . htmlspecialchars((string)($row['DateIssued'] ?? '')) . '</td>
@@ -2493,7 +2365,6 @@ public function exportFranchiseForm(?string $id = null): void {
             "SELECT 
                 f.*,
                 CONCAT(a.FirstName,' ',a.LastName) as ApplicantName,
-                a.Gender,
                 a.ContactNo,
                 a.Address,
                 m.Name as MakeName,

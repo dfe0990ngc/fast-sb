@@ -324,7 +324,7 @@ const FranchiseFormDialog = memo(({
                             }}
                           >
                             <Check className={`mr-2 h-4 w-4 ${formData.ApplicantID === applicant.id.toString() ? "opacity-100" : "opacity-0"}`} />
-                            {applicant.FirstName} {applicant.LastName}
+                            {applicant.FirstName} {applicant.LastName}{applicant.Gender ? ` (${applicant.Gender})` : ""}
                           </CommandItem>
                         ))}
                       </CommandGroup>

@@ -34,4 +34,13 @@ define('LOGIN_RATE_WINDOW', (int) ($_ENV['LOGIN_RATE_WINDOW'] ?? 900)); // 15 mi
 define('RATE_LIMIT_CACHE_PATH', __DIR__ . '/storage/cache/ratelimit');
 define('LOG_PATH', __DIR__ . '/storage/logs');
 
+define('R2_ENDPOINT', $_ENV['R2_ENDPOINT'] ?: '');
+define('R2_ACCESS_KEY', $_ENV['R2_ACCESS_KEY'] ?: '');
+define('R2_SECRET_KEY', $_ENV['R2_SECRET_KEY'] ?: '');
+define('R2_BUCKET', $_ENV['R2_BUCKET'] ?: '');
+define('R2_PUBLIC_URL', $_ENV['R2_PUBLIC_URL'] ?: '');
+
+define('STORAGE_DRIVER',$_ENV['STORAGE_DRIVER'] ?: 'local');
+
+
 ?>

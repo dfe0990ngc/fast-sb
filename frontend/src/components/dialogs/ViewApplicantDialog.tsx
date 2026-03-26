@@ -1,13 +1,22 @@
-import { useEffect, useState, memo } from "react";
+import { useEffect, useState, memo, useMemo } from "react";
 import { Applicant } from "../../types/types";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Badge } from "../ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 import { formatDate, getStatusBadgeClass, getStatusColor, getStatusLabel } from "../../lib/utils";
+import { streamPdfToBrowser } from "../../lib/pdfStream";
 import * as api from '../../api/api';
-import { Car, Clock, Edit, FileText, Hash, Loader2, MapPin, ServerCrash, User } from "lucide-react";
+import {
+  Car,
+  Edit,
+  FileText,
+  Loader2,
+  ServerCrash,
+  Eye,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { useAuth } from "../../context/AuthContext";
+import { toast } from "sonner";
 
 interface ViewApplicantDialogProps {
   open: boolean;
@@ -15,6 +24,18 @@ interface ViewApplicantDialogProps {
   onEdit: () => void;
   applicantId: number | null;
 }
+
+type ApplicantDocumentItem = {
+  id: string | number;
+  OriginalFileName?: string;
+  FilePath?: string;
+  FileSize?: number;
+  MimeType?: string;
+  Label?: string;
+  StreamUrl?: string;
+  CreatedAt?: string;
+  UpdatedAt?: string;
+};
 
 // Helper function to get border color class based on status
 const getFranchiseDetailsBorderClass = (status: string) => {
@@ -26,8 +47,14 @@ const getFranchiseDetailsBorderClass = (status: string) => {
     case 'drop':
       return 'border-orange-500';
     default:
-      return 'border-gray-300'; // Default border color
+      return 'border-gray-300';
   }
+};
+
+const formatFileSize = (bytes?: number) => {
+  if (!bytes || Number.isNaN(bytes)) return null;
+  if (bytes < 1024 * 1024) return `${Math.max(bytes / 1024, 0.1).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewApplicantDialogProps) => {
@@ -35,6 +62,7 @@ const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewAp
   const [applicant, setApplicant] = useState<Applicant | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openingDocumentId, setOpeningDocumentId] = useState<string | number | null>(null);
 
   useEffect(() => {
     const fetchApplicantDetails = async () => {
@@ -59,6 +87,103 @@ const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewAp
     fetchApplicantDetails();
   }, [open, applicantId]);
 
+  const documents = useMemo<ApplicantDocumentItem[]>(() => {
+    const rawDocuments =
+      (applicant as any)?.documents ||
+      (applicant as any)?.Documents ||
+      [];
+
+    if (!Array.isArray(rawDocuments)) return [];
+
+    return rawDocuments.map((doc: any) => ({
+      id: doc.id,
+      OriginalFileName: doc.OriginalFileName,
+      FilePath: doc.FilePath,
+      FileSize: doc.FileSize,
+      MimeType: doc.MimeType,
+      Label: doc.Label || "PDF",
+      StreamUrl:
+        doc.StreamUrl ||
+        (applicantId ? `/fast-sb/api/applicants/${applicantId}/documents/${doc.id}/stream` : undefined),
+      CreatedAt: doc.CreatedAt,
+      UpdatedAt: doc.UpdatedAt,
+    }));
+  }, [applicant, applicantId]);
+
+  const handleViewDocument = async (document: ApplicantDocumentItem) => {
+    try {
+      setOpeningDocumentId(document.id);
+
+      await streamPdfToBrowser({
+        url:
+          document.StreamUrl ||
+          `/fast-sb/api/applicants/${applicantId}/documents/${document.id}/stream`,
+        fileName: document.OriginalFileName || `applicant-document-${document.id}.pdf`,
+        mode: "open",
+      });
+    } catch (err) {
+      toast.error("Failed to open PDF document.");
+    } finally {
+      setOpeningDocumentId(null);
+    }
+  };
+
+  const renderDocumentsSection = () => {
+    if (!documents.length) return null;
+
+    return (
+      <div className="mb-6">
+        <h3 className="mb-3 font-semibold">Requirement Documents ({documents.length})</h3>
+
+        <div className="gap-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          {documents.map((document) => (
+            <button
+              key={document.id}
+              type="button"
+              onClick={() => handleViewDocument(document)}
+              className="group relative flex flex-col items-start gap-3 hover:bg-muted/70 p-4 border rounded-xl text-left transition"
+            >
+              <div className="flex justify-between items-start gap-3 w-full">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex justify-center items-center bg-red-50 group-hover:bg-red-100 rounded-lg w-11 h-11 transition shrink-0">
+                    <FileText className="w-5 h-5 text-red-600" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center bg-red-100 mb-1 px-2 py-0.5 rounded-full font-semibold text-[10px] text-red-700 uppercase tracking-wide">
+                      {document.Label || "PDF"}
+                    </div>
+                    <div className="font-medium text-sm break-words leading-snug">
+                      {document.OriginalFileName || `Document #${document.id}`}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center items-center bg-muted rounded-full w-8 h-8 shrink-0">
+                  {openingDocumentId === document.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-muted-foreground" />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                <span>Click to view</span>
+                {document.FileSize ? (
+                  <>
+                    <span>•</span>
+                    <span>{formatFileSize(document.FileSize)}</span>
+                  </>
+                ) : null}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     if (loading) {
       return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
@@ -73,10 +198,25 @@ const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewAp
     return (
       <>
         <div className="gap-4 grid grid-cols-1 sm:grid-cols-2 mb-6 text-sm">
-          <div className="space-y-1"><div className="text-muted-foreground">Full Name</div><div className="font-medium">{applicant.FirstName} {applicant.MiddleName} {applicant.LastName}</div></div>
-          <div className="space-y-1"><div className="text-muted-foreground">Contact No.</div><div className="font-medium">{applicant.ContactNo || 'N/A'}</div></div>
-          <div className="space-y-1 col-span-2"><div className="text-muted-foreground">Address</div><div className="font-medium">{applicant.Address}</div></div>
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Full Name</div>
+            <div className="font-medium">
+              {applicant.FirstName} {applicant.MiddleName} {applicant.LastName}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Contact No.</div>
+            <div className="font-medium">{applicant.ContactNo || 'N/A'}</div>
+          </div>
+
+          <div className="space-y-1 col-span-2">
+            <div className="text-muted-foreground">Address</div>
+            <div className="font-medium">{applicant.Address}</div>
+          </div>
         </div>
+
+        {renderDocumentsSection()}
 
         <h3 className="mb-2 font-semibold">Franchises ({applicant.franchises?.length || 0})</h3>
         {applicant.franchises && applicant.franchises.length > 0 ? (
@@ -90,7 +230,9 @@ const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewAp
                       <span className="font-semibold">{franchise.FranchiseNo}</span>
                       <span className="text-muted-foreground">({franchise.PlateNo})</span>
                     </div>
-                    <Badge className={getStatusColor(franchise.Status, franchise.ExpiryDate, franchise.LatestExpiryDate)}>{getStatusLabel(franchise.Status).toUpperCase()}</Badge>
+                    <Badge className={getStatusColor(franchise.Status, franchise.ExpiryDate, franchise.LatestExpiryDate)}>
+                      {getStatusLabel(franchise.Status).toUpperCase()}
+                    </Badge>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
@@ -124,13 +266,16 @@ const ViewApplicantDialog = memo(({ open, onClose, onEdit, applicantId }: ViewAp
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="flex flex-col sm:max-w-3xl max-h-[90vh]"
+      <DialogContent
+        className="flex flex-col sm:max-w-3xl max-h-[90vh]"
         onInteractOutside={(e) => {
           e.preventDefault();
-        }}>
+        }}
+      >
         <DialogHeader className="px-3 sm:px-6 pt-6">
           <DialogTitle>Applicant Details</DialogTitle>
         </DialogHeader>
+
         <div className="flex-grow p-3 sm:p-6 pr-2 max-h-[calc(90vh-10rem)] overflow-y-auto">
           {renderContent()}
         </div>

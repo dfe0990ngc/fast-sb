@@ -6,13 +6,12 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Max-Age: 86400'); // Optional: Cache preflight requests for 24 hours
+header('Access-Control-Max-Age: 86400');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
-// --- CORS Configuration END ---
 
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -40,7 +39,8 @@ use App\controllers\ApplicantController;
 
 $router = new Router();
 
-// Set the base path prefix - all routes will now be prefixed with this
+// Keep the base path at /fast-sb because every route below already starts with /api.
+// Setting this to /fast-sb/api would break routes like /api/applicants/... after trimming.
 $router->setBasePath('/fast-sb');
 
 // Maintenance
@@ -51,22 +51,22 @@ $router->get('/api/clear-expired-tokens', [AuthController::class, 'clearExpiredT
 $router->post('/api/auth/login', [AuthController::class, 'login']);
 
 // Protected routes (require authentication)
-$router->post('/api/auth/register', [AuthController::class, 'register'],[AuthMiddleware::class]);
-$router->post('/api/auth/change-password', [AuthController::class, 'resetPassword'],[AuthMiddleware::class]);
+$router->post('/api/auth/register', [AuthController::class, 'register'], [AuthMiddleware::class]);
+$router->post('/api/auth/change-password', [AuthController::class, 'resetPassword'], [AuthMiddleware::class]);
 $router->post('/api/auth/logout', [AuthController::class, 'logout'], [AuthMiddleware::class]);
 $router->post('/api/auth/refresh', [AuthController::class, 'refresh']);
 
 // Dashboard
-$router->get('/api/dashboard', [DashboardController::class,'index'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/stats', [DashboardController::class,'stats'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/trends', [DashboardController::class,'trends'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/status-distribution', [DashboardController::class,'statusDistribution'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/top-routes', [DashboardController::class,'topRoutes'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/top-makes', [DashboardController::class,'topMakes'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/recent-activities', [DashboardController::class,'recentActivities'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/expiring-franchises', [DashboardController::class,'expiringFranchises'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/route-performance', [DashboardController::class,'routePerformance'],[AuthMiddleware::class]);
-$router->get('/api/dashboard/monthly-comparison', [DashboardController::class,'monthlyComparison'],[AuthMiddleware::class]);
+$router->get('/api/dashboard', [DashboardController::class, 'index'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/stats', [DashboardController::class, 'stats'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/trends', [DashboardController::class, 'trends'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/status-distribution', [DashboardController::class, 'statusDistribution'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/top-routes', [DashboardController::class, 'topRoutes'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/top-makes', [DashboardController::class, 'topMakes'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/recent-activities', [DashboardController::class, 'recentActivities'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/expiring-franchises', [DashboardController::class, 'expiringFranchises'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/route-performance', [DashboardController::class, 'routePerformance'], [AuthMiddleware::class]);
+$router->get('/api/dashboard/monthly-comparison', [DashboardController::class, 'monthlyComparison'], [AuthMiddleware::class]);
 
 // Franchise routes (require authentication)
 $router->get('/api/franchises', [FranchiseController::class, 'index'], [AuthMiddleware::class]);
@@ -80,13 +80,16 @@ $router->get('/api/franchises/{id}/history', [FranchiseController::class, 'getHi
 $router->get('/api/franchises/statistics/{year}', [FranchiseController::class, 'statistics'], [AuthMiddleware::class]);
 $router->get('/api/franchises/export/pdf', [FranchiseController::class, 'exportPDF'], [AuthMiddleware::class]);
 $router->get('/api/franchises/export/summary-by-route/pdf', [FranchiseController::class, 'exportSummaryByRoutePDF'], [AuthMiddleware::class]);
-$router->get('/api/franchises/{id}/export-form', [FranchiseController::class,'exportFranchiseForm'],[AuthMiddleware::class]);
+$router->get('/api/franchises/{id}/export-form', [FranchiseController::class, 'exportFranchiseForm'], [AuthMiddleware::class]);
 
 // Applicant Routes (require authentication)
 $router->get('/api/applicants', [ApplicantController::class, 'index'], [AuthMiddleware::class]);
 $router->post('/api/applicants', [ApplicantController::class, 'create'], [AuthMiddleware::class]);
 $router->get('/api/applicants/{id}', [ApplicantController::class, 'show'], [AuthMiddleware::class]);
 $router->put('/api/applicants/{id}', [ApplicantController::class, 'update'], [AuthMiddleware::class]);
+$router->post('/api/applicants/{id}/documents', [ApplicantController::class, 'uploadDocuments'], [AuthMiddleware::class]);
+$router->get('/api/applicants/{id}/documents/{documentId}/stream', [ApplicantController::class, 'streamDocument'], [AuthMiddleware::class]);
+$router->delete('/api/applicants/{id}/documents/{documentId}', [ApplicantController::class, 'deleteDocument'], [AuthMiddleware::class]);
 $router->delete('/api/applicants/{id}', [ApplicantController::class, 'delete'], [AuthMiddleware::class]);
 
 // Make routes (require authentication)
@@ -111,27 +114,26 @@ $router->get('/api/settings/export-backup', [SettingsController::class, 'exportB
 $router->post('/api/settings/clear-caches', [SettingsController::class, 'clearCaches'], [AuthMiddleware::class]);
 $router->post('/api/settings/clear-logs', [SettingsController::class, 'clearLogs'], [AuthMiddleware::class]);
 
-
 // Welcome screen
 $router->get('/api/welcome-stats', [DashboardController::class, 'welcomeStats']);
+
 try {
     $router->dispatch();
 } catch (Throwable $e) {
-    // Always log errors regardless of debug mode
     error_log('=== APPLICATION ERROR ===');
     error_log('Message: ' . $e->getMessage());
     error_log('File: ' . $e->getFile());
     error_log('Line: ' . $e->getLine());
     error_log('Trace: ' . $e->getTraceAsString());
     error_log('========================');
-    
+
     http_response_code(500);
-    
+
     $errorResponse = [
         'success' => false,
         'message' => 'Internal server error'
     ];
-    
+
     if (DEBUG_MODE) {
         $errorResponse['error'] = [
             'message' => $e->getMessage(),
@@ -142,6 +144,6 @@ try {
     } else {
         $errorResponse['error'] = 'An unexpected error occurred.';
     }
-    
+
     echo json_encode($errorResponse);
 }

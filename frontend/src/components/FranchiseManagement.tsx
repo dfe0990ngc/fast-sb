@@ -42,11 +42,13 @@ type ExportPdfType =
 type ExportPdfAction = 'download' | 'open' | 'print';
 
 type ExportPdfStatus = 'all' | 'new' | 'renew' | 'drop' | 'active';
+type ExportPdfGender = 'all' | 'M' | 'F';
 
 type ExportPdfOptions = {
   type?: ExportPdfType;
   action?: ExportPdfAction;
   status?: ExportPdfStatus;
+  gender?: ExportPdfGender;
 };
 
 function formatDateForApi(date: Date) {
@@ -60,22 +62,35 @@ function getTodayForFilename() {
   return new Date().toISOString().split('T')[0];
 }
 
-function appendOptionalDateParams(endpoint: string, start?: string | null, end?: string | null) {
+function appendQueryParams(
+  endpoint: string,
+  paramsInput: Record<string, string | null | undefined>
+) {
   const params = new URLSearchParams();
 
-  if (start) {
-    params.set('start_date', start);
-
-    if (end) {
-      params.set('end_date', end);
+  Object.entries(paramsInput).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') {
+      params.set(key, value);
     }
-  }
+  });
 
   const query = params.toString();
-
   if (!query) return endpoint;
 
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}${query}`;
+}
+
+function appendOptionalDateParams(
+  endpoint: string,
+  start?: string | null,
+  end?: string | null,
+  extraParams: Record<string, string | null | undefined> = {}
+) {
+  return appendQueryParams(endpoint, {
+    ...extraParams,
+    start_date: start ?? undefined,
+    end_date: start ? end ?? undefined : undefined,
+  });
 }
 
 function downloadBlobUrl(blobUrl: string, filename: string) {
@@ -137,57 +152,86 @@ function getPdfExportConfig(
   type: ExportPdfType,
   start: string | null,
   end: string | null,
-  status: ExportPdfStatus
+  status: ExportPdfStatus,
+  gender: ExportPdfGender
 ) {
   const today = getTodayForFilename();
+  const genderParam = gender === 'all' ? 'all' : gender;
 
   switch (type) {
     case 'summaryByRoute':
       return {
-        endpoint: `/api/franchises/export/summary-by-route/pdf?start_date=${encodeURIComponent(start ?? '')}&end_date=${encodeURIComponent(end ?? '')}`,
+        endpoint: appendQueryParams('/api/franchises/export/summary-by-route/pdf', {
+          start_date: start ?? '',
+          end_date: end ?? '',
+          gender_filter: genderParam,
+        }),
         filename: `Franchise_Summary_By_Route_${today}.pdf`,
       };
 
     case 'activeHolders':
       return {
-        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=activeHolders', start, end),
+        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=activeHolders', start, end, {
+          gender_filter: genderParam,
+        }),
         filename: `Active_Franchise_Holders_${today}.pdf`,
       };
 
     case 'droppedMasterlist':
       return {
-        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=droppedMasterlist', start, end),
+        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=droppedMasterlist', start, end, {
+          gender_filter: genderParam,
+        }),
         filename: `Dropped_Franchise_Masterlist_${today}.pdf`,
       };
 
     case 'perHolderSummary':
       return {
-        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=perHolderSummary', start, end),
+        endpoint: appendOptionalDateParams('/api/franchises/export/pdf?report_type=perHolderSummary', start, end, {
+          gender_filter: genderParam,
+        }),
         filename: `Per_Holder_Summary_${today}.pdf`,
       };
 
     case 'expiring30':
       return {
-        endpoint: '/api/franchises/export/pdf?report_type=expiring&window=30',
+        endpoint: appendQueryParams('/api/franchises/export/pdf', {
+          report_type: 'expiring',
+          window: '30',
+          gender_filter: genderParam,
+        }),
         filename: `Franchises_Expiring_Within_30_Days_${today}.pdf`,
       };
 
     case 'expiring60':
       return {
-        endpoint: '/api/franchises/export/pdf?report_type=expiring&window=60',
+        endpoint: appendQueryParams('/api/franchises/export/pdf', {
+          report_type: 'expiring',
+          window: '60',
+          gender_filter: genderParam,
+        }),
         filename: `Franchises_Expiring_Within_60_Days_${today}.pdf`,
       };
 
     case 'expiring90':
       return {
-        endpoint: '/api/franchises/export/pdf?report_type=expiring&window=90',
+        endpoint: appendQueryParams('/api/franchises/export/pdf', {
+          report_type: 'expiring',
+          window: '90',
+          gender_filter: genderParam,
+        }),
         filename: `Franchises_Expiring_Within_90_Days_${today}.pdf`,
       };
 
     case 'report':
     default:
       return {
-        endpoint: `/api/franchises/export/pdf?start_date=${encodeURIComponent(start ?? '')}&end_date=${encodeURIComponent(end ?? '')}&status=${encodeURIComponent(status)}`,
+        endpoint: appendQueryParams('/api/franchises/export/pdf', {
+          start_date: start ?? '',
+          end_date: end ?? '',
+          status,
+          gender_filter: genderParam,
+        }),
         filename: `Franchise_Report_${today}.pdf`,
       };
   }
@@ -451,12 +495,13 @@ export default function FranchiseManagement() {
     const type = options?.type ?? exportDefaultType ?? 'report';
     const action = options?.action ?? 'download';
     const status = options?.status ?? 'all';
+    const gender = options?.gender ?? 'all';
 
     try {
       const start = startDate ? formatDateForApi(startDate) : null;
       const end = endDate ? formatDateForApi(endDate) : null;
 
-      const { endpoint, filename } = getPdfExportConfig(type, start, end, status);
+      const { endpoint, filename } = getPdfExportConfig(type, start, end, status, gender);
 
       const { data } = await api.get(endpoint, { responseType: 'blob' });
       const blob = new Blob([data], { type: 'application/pdf' });

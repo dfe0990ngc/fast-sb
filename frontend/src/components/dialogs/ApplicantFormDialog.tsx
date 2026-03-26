@@ -11,6 +11,14 @@ import {
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import ApplicantDocumentsPanel from "./ApplicantDocumentsPanel";
 
 const DEFAULT_FORM_DATA: Partial<Applicant> = {
   FirstName: "",
@@ -18,6 +26,7 @@ const DEFAULT_FORM_DATA: Partial<Applicant> = {
   MiddleName: "",
   Address: "",
   ContactNo: "",
+  Gender: "",
 };
 
 interface ApplicantFormDialogProps {
@@ -63,6 +72,7 @@ const ApplicantFormDialog = memo(({ open, onClose, onSave, applicant, mode, init
     if (!formData.FirstName?.trim()) newErrors.FirstName = "First name is required";
     if (!formData.LastName?.trim()) newErrors.LastName = "Last name is required";
     if (!formData.Address?.trim()) newErrors.Address = "Address is required";
+    if (!formData.Gender || !["M", "F"].includes(formData.Gender)) newErrors.Gender = "Gender is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -80,7 +90,7 @@ const ApplicantFormDialog = memo(({ open, onClose, onSave, applicant, mode, init
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden"
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden"
         onInteractOutside={(e) => {
           e.preventDefault();
         }}>
@@ -88,26 +98,43 @@ const ApplicantFormDialog = memo(({ open, onClose, onSave, applicant, mode, init
           <DialogHeader className="px-3 sm:px-6 pt-6">
             <DialogTitle>{mode === "create" ? "Create New Applicant" : "Edit Applicant"}</DialogTitle>
             <DialogDescription>
-              {mode === "create" ? "Add a new applicant to the system." : "Modify existing applicant details."}
+              {mode === "create" ? "Add a new applicant to the system." : "Modify existing applicant details and requirement PDFs."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 p-3 sm:p-6 max-h-[calc(90vh-8rem)] overflow-y-auto">
+          <div className="space-y-5 p-3 sm:p-6 max-h-[calc(90vh-8rem)] overflow-y-auto">
             <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
               <div className="space-y-2"><Label htmlFor="first-name">First Name <span className="text-red-500">*</span></Label><Input id="first-name" value={formData.FirstName || ""} onChange={(e) => handleChange("FirstName", e.target.value)} className={errors.FirstName ? "border-red-500" : ""} />{errors.FirstName && <p className="text-red-500 text-sm">{errors.FirstName}</p>}</div>
               <div className="space-y-2"><Label htmlFor="last-name">Last Name <span className="text-red-500">*</span></Label><Input id="last-name" value={formData.LastName || ""} onChange={(e) => handleChange("LastName", e.target.value)} className={errors.LastName ? "border-red-500" : ""} />{errors.LastName && <p className="text-red-500 text-sm">{errors.LastName}</p>}</div>
             </div>
-            
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
+
+            <div className="gap-4 grid grid-cols-1 sm:grid-cols-3">
               <div className="space-y-2"><Label htmlFor="middle-name">Middle Name</Label><Input id="middle-name" value={formData.MiddleName || ""} onChange={(e) => handleChange("MiddleName", e.target.value)} /></div>
               <div className="space-y-2"><Label htmlFor="contact-no">Contact Number</Label><Input id="contact-no" value={formData.ContactNo || ""} onChange={(e) => handleChange("ContactNo", e.target.value)} /></div>
+              <div className="space-y-2">
+                <Label htmlFor="gender">Gender <span className="text-red-500">*</span></Label>
+                <Select value={formData.Gender || ""} onValueChange={(value) => handleChange("Gender", value)}>
+                  <SelectTrigger id="gender" className={errors.Gender ? "border-red-500" : ""}>
+                    <SelectValue placeholder="Select gender" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="M">M</SelectItem>
+                    <SelectItem value="F">F</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.Gender && <p className="text-red-500 text-sm">{errors.Gender}</p>}
+              </div>
             </div>
 
             <div className="space-y-2"><Label htmlFor="address">Address <span className="text-red-500">*</span></Label><Input id="address" value={formData.Address || ""} onChange={(e) => handleChange("Address", e.target.value)} className={errors.Address ? "border-red-500" : ""} />{errors.Address && <p className="text-red-500 text-sm">{errors.Address}</p>}</div>
 
+            <ApplicantDocumentsPanel
+              applicantId={applicant?.id ?? null}
+              initialDocuments={applicant?.documents || applicant?.Documents || []}
+            />
           </div>
 
-          <DialogFooter className="bottom-0 sticky flex sm:flex-row flex-col justify-end gap-2 bg-white p-6 border-t"><Button type="button" variant="outline" onClick={onClose}>Cancel</Button><Button type="submit" className="bg-[#008ea2] hover:bg-[#007a8b]">{mode === "create" ? "Create Applicant" : "Save Changes"}</Button></DialogFooter>
+          <DialogFooter className="sticky bottom-0 flex flex-col justify-end gap-2 border-t bg-white p-6 sm:flex-row"><Button type="button" variant="outline" onClick={onClose}>Cancel</Button><Button type="submit" className="bg-[#008ea2] hover:bg-[#007a8b]">{mode === "create" ? "Create Applicant" : "Save Changes"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

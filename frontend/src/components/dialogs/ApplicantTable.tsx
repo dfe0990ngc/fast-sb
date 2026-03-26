@@ -20,6 +20,7 @@ const ApplicantTableRow = memo(({ applicant, onView, onEdit, onDelete }: Applica
   return (
     <TableRow key={applicant.id}>
       <TableCell className="font-medium">{applicant.LastName}, {applicant.FirstName} {applicant.MiddleName || ''}</TableCell>
+      <TableCell>{applicant.Gender || 'N/A'}</TableCell>
       <TableCell>{applicant.Address}</TableCell>
       <TableCell>{applicant.ContactNo || 'N/A'}</TableCell>
       <TableCell>
@@ -59,6 +60,7 @@ const ApplicantTable = memo(({ applicants, onView, onEdit, onDelete }: Applicant
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
+            <TableHead>Gender</TableHead>
             <TableHead>Address</TableHead>
             <TableHead>Contact No.</TableHead>
             <TableHead className="w-[140px]">Actions</TableHead>

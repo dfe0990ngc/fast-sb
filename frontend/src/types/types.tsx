@@ -1,3 +1,5 @@
+import type React from 'react';
+
 // Union Types and Enums
 export type UserRole = 'Admin' | 'Editor' | 'Viewer';
 export type UserStatus = 'active' | 'inactive' | 'pending';
@@ -33,6 +35,21 @@ export interface Make {
   UpdatedAt: string;
 }
 
+export interface ApplicantDocument {
+  id: string;
+  ApplicantID: string;
+  OriginalFileName: string;
+  FilePath: string;
+  FileSize: number;
+  MimeType: string;
+  CreatedBy?: string;
+  UpdatedBy?: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+  Label?: string;
+  StreamUrl?: string;
+}
+
 export interface Applicant {
   id: string;
   FirstName: string;
@@ -40,6 +57,9 @@ export interface Applicant {
   MiddleName?: string;
   Address: string;
   ContactNo?: string;
+  Gender?: string;
+  documents?: ApplicantDocument[];
+  Documents?: ApplicantDocument[];
   CreatedBy?: string;
   UpdatedBy?: string;
   CreatedByName?: string;
@@ -65,6 +85,7 @@ export interface Franchise {
   ApplicantName: string; // Combined name for display
   ContactNo: string;
   Address: string;
+  Driver?: string;
   DateIssued: string;
   Route: string;
   MakeID: string;

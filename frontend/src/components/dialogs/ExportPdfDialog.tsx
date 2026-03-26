@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,12 +33,14 @@ type ExportTypeOption =
 
 export type ExportPdfStatus = 'all' | 'new' | 'renew' | 'drop' | 'active';
 export type ExportPdfAction = 'download' | 'open' | 'print';
+export type ExportPdfGender = 'all' | 'M' | 'F';
 export type ExpiringWindow = 30 | 60 | 90;
 
 export type ExportPdfOptions = {
   type: ExportPdfType;
   action: ExportPdfAction;
   status?: ExportPdfStatus;
+  gender?: ExportPdfGender;
 };
 
 interface ExportPdfDialogProps {
@@ -143,6 +146,18 @@ function getStatusLabel(status: ExportPdfStatus) {
   }
 }
 
+function getGenderLabel(gender: ExportPdfGender) {
+  switch (gender) {
+    case 'M':
+      return 'Male';
+    case 'F':
+      return 'Female';
+    case 'all':
+    default:
+      return 'All';
+  }
+}
+
 function Field({
   label,
   hint,
@@ -150,7 +165,7 @@ function Field({
 }: {
   label: string;
   hint?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
@@ -175,6 +190,7 @@ export default function ExportPdfDialog({
     mapDefaultTypeToSelectableType(defaultType)
   );
   const [statusFilter, setStatusFilter] = useState<ExportPdfStatus>('all');
+  const [genderFilter, setGenderFilter] = useState<ExportPdfGender>('all');
   const [expiringWindow, setExpiringWindow] = useState<ExpiringWindow>(
     mapDefaultTypeToWindow(defaultType)
   );
@@ -202,6 +218,7 @@ export default function ExportPdfDialog({
     const mappedType = mapDefaultTypeToSelectableType(defaultType);
     setExportType(mappedType);
     setStatusFilter('all');
+    setGenderFilter('all');
     setExpiringWindow(mapDefaultTypeToWindow(defaultType));
     applyTypeDefaults(mappedType);
   }, [defaultType, open, applyTypeDefaults]);
@@ -235,7 +252,7 @@ export default function ExportPdfDialog({
   }, [exportType]);
 
   const selectionText = useMemo(() => {
-    const parts: string[] = [getTypeLabel(exportType)];
+    const parts: string[] = [getTypeLabel(exportType), `Gender: ${getGenderLabel(genderFilter)}`];
 
     if (isStatusVisible) {
       parts.push(getStatusLabel(statusFilter));
@@ -267,6 +284,7 @@ export default function ExportPdfDialog({
     exportType,
     formData.endDate,
     formData.startDate,
+    genderFilter,
     isExpiringType,
     isStatusVisible,
     requiresDateRange,
@@ -311,6 +329,7 @@ export default function ExportPdfDialog({
       type: resolvedType,
       action,
       status: isStatusVisible ? statusFilter : undefined,
+      gender: genderFilter,
     });
   };
 
@@ -321,8 +340,8 @@ export default function ExportPdfDialog({
         if (!nextOpen) onClose();
       }}
     >
-      <DialogContent className="p-0 sm:max-w-lg overflow-hidden">
-        <DialogHeader className="bg-slate-50 px-5 py-4 border-b">
+      <DialogContent className="overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="border-b bg-slate-50 px-5 py-4">
           <DialogTitle className="text-base sm:text-lg">{title}</DialogTitle>
           <DialogDescription className="text-sm leading-relaxed">
             {description}
@@ -332,7 +351,7 @@ export default function ExportPdfDialog({
         <div className="space-y-4 px-5 py-4">
           <Field label="Export Type">
             <select
-              className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
               value={exportType}
               onChange={(e) => {
                 const nextType = e.target.value as ExportTypeOption;
@@ -356,10 +375,23 @@ export default function ExportPdfDialog({
             </select>
           </Field>
 
+          <Field label="Gender">
+            <select
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
+              value={genderFilter}
+              onChange={(e) => setGenderFilter(e.target.value as ExportPdfGender)}
+              disabled={isExporting}
+            >
+              <option value="all">All</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </Field>
+
           {isStatusVisible ? (
             <Field label="Status">
               <select
-                className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as ExportPdfStatus)}
                 disabled={isExporting}
@@ -376,7 +408,7 @@ export default function ExportPdfDialog({
           {isExpiringType ? (
             <Field label="Expiring Window">
               <select
-                className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
                 value={expiringWindow}
                 onChange={(e) => setExpiringWindow(Number(e.target.value) as ExpiringWindow)}
                 disabled={isExporting}
@@ -389,17 +421,17 @@ export default function ExportPdfDialog({
           ) : null}
 
           {(requiresDateRange || supportsOptionalDateFilter) ? (
-            <div className="space-y-3 bg-slate-50 px-4 py-3 border rounded-lg">
+            <div className="space-y-3 rounded-lg border bg-slate-50 px-4 py-3">
               <div>
-                <p className="font-medium text-slate-700 text-sm">Date Filter</p>
-                <p className="mt-0.5 text-slate-500 text-xs leading-relaxed">
+                <p className="text-sm font-medium text-slate-700">Date Filter</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
                   {requiresDateRange
                     ? 'Both start date and end date are required.'
                     : 'Leave both dates blank for All. Enter only start date to filter from that date onward.'}
                 </p>
               </div>
 
-              <div className="gap-3 grid grid-cols-1 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Start Date">
                   <Input
                     id="start-date"
@@ -423,13 +455,13 @@ export default function ExportPdfDialog({
             </div>
           ) : null}
 
-          <div className="bg-white px-4 py-3 border rounded-lg">
-            <p className="font-medium text-slate-700 text-sm">Current Selection</p>
-            <p className="mt-1 text-slate-500 text-sm leading-relaxed">{selectionText}</p>
+          <div className="rounded-lg border bg-white px-4 py-3">
+            <p className="text-sm font-medium text-slate-700">Current Selection</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-500">{selectionText}</p>
           </div>
         </div>
 
-        <DialogFooter className="flex sm:flex-row flex-col gap-2 bg-white px-5 py-4 border-t">
+        <DialogFooter className="flex flex-col gap-2 border-t bg-white px-5 py-4 sm:flex-row">
           <Button variant="outline" onClick={onClose} disabled={isExporting}>
             Cancel
           </Button>
@@ -440,7 +472,7 @@ export default function ExportPdfDialog({
             disabled={isExporting}
             className="w-full sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Open
           </Button>
 
@@ -450,16 +482,16 @@ export default function ExportPdfDialog({
             disabled={isExporting}
             className="w-full sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Print
           </Button>
 
           <Button
             onClick={() => void doExport('download')}
             disabled={isExporting}
-            className="bg-[#008ea2] hover:bg-[#007a8b] w-full sm:w-auto"
+            className="w-full bg-[#008ea2] hover:bg-[#007a8b] sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Download PDF
           </Button>
         </DialogFooter>

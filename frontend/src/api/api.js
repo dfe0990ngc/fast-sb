@@ -6,7 +6,41 @@ import axios from "axios";
 // ==================================================
 let isRefreshing = false;
 let failedQueue = [];
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin+'/fast-sb';
+const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${window.location.origin}/fast-sb`;
+const BASE_URL = RAW_BASE_URL.replace(/\/$/, '');
+
+export const getApiBaseUrl = () => BASE_URL;
+
+export const resolveApiUrl = (path = '') => {
+  const rawPath = String(path || '').trim();
+
+  if (!rawPath) {
+    return BASE_URL;
+  }
+
+  if (/^https?:\/\//i.test(rawPath)) {
+    return rawPath;
+  }
+
+  if (rawPath.startsWith(BASE_URL)) {
+    return rawPath;
+  }
+
+  const baseUrlObject = new URL(BASE_URL, window.location.origin);
+  const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+
+  // Handles callers that already pass /fast-sb/api/... so we do not end up with
+  // /fast-sb/fast-sb/api/...
+  if (normalizedPath.startsWith('/fast-sb/')) {
+    return `${baseUrlObject.origin}${normalizedPath}`;
+  }
+
+  return `${BASE_URL}${normalizedPath}`;
+};
+
+export const buildApplicantDocumentStreamUrl = (applicantId, documentId) => {
+  return resolveApiUrl(`/api/applicants/${applicantId}/documents/${documentId}/stream`);
+};
 
 const processQueue = (error, token = null) => {
   failedQueue.forEach(prom => {
@@ -106,7 +140,7 @@ api.interceptors.request.use(
           try {
             // Note: refresh-token request should NOT have an Authorization header
             const response = await axios.post(
-              `${BASE_URL}/api/auth/refresh`, // Corrected to use /api/auth/refresh
+              `${BASE_URL}/api/auth/refresh`,
               { refresh_token: refreshToken },
               {
                 headers: {
@@ -118,7 +152,6 @@ api.interceptors.request.use(
 
             const { access_token, refresh_token, expires_in } = response.data;
             setTokens(access_token, refresh_token, expires_in);
-
 
             token = access_token;
             isRefreshing = false;
@@ -191,7 +224,7 @@ api.interceptors.response.use(
 
         try {
           const response = await axios.post(
-            `${BASE_URL}/api/auth/refresh`, // Corrected to use /api/auth/refresh
+            `${BASE_URL}/api/auth/refresh`,
             { refresh_token: refreshToken },
             {
               headers: {
@@ -201,17 +234,16 @@ api.interceptors.response.use(
             }
           );
 
-          const { access_token, refresh_token, expires_in } = response.data; // Destructure data
+          const { access_token, refresh_token, expires_in } = response.data;
           const newAccessToken = access_token;
-          const newRefreshToken = refresh_token || refreshToken; // Use new token if provided, fallback to current
-          // const expiresIn = expires_in; // Already destructured
+          const newRefreshToken = refresh_token || refreshToken;
           setTokens(newAccessToken, newRefreshToken, expires_in);
 
           isRefreshing = false;
-          processQueue(null, newAccessToken); // Use newAccessToken here
+          processQueue(null, newAccessToken);
 
           // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`; // Use newAccessToken here
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           return api(originalRequest);
         } catch (refreshError) {
           isRefreshing = false;
@@ -237,7 +269,6 @@ api.interceptors.response.use(
       } else {
         clearTokens();
         window.dispatchEvent(new CustomEvent('auth:logout', { detail: 'unauthorized' }));
-        // Reject the original request since there's no way to authenticate
         return Promise.reject(new Error('Unauthorized. User logged out.'));
       }
     }
@@ -297,7 +328,7 @@ export const cancelRequest = (key) => {
 };
 
 export const cancelAllRequests = () => {
-  pendingRequests.forEach((controller, key) => {
+  pendingRequests.forEach((controller) => {
     controller.abort();
   });
   pendingRequests.clear();
@@ -311,26 +342,23 @@ export const getPendingRequests = () => {
 // Enhanced HTTP Methods with AbortController Support
 // ==================================================
 
-// Helper to create a unified config for all HTTP methods
 const createRequestConfig = (config, options) => {
   const { signal, track = true, requestKey, excludeAuth = false } = options;
 
   const controller = signal ? null : new AbortController();
   const requestSignal = signal || controller?.signal;
 
-  // Augment config with a 'meta' property to pass custom options to interceptors
   const augmentedConfig = {
     ...config,
     signal: requestSignal,
     meta: {
       ...config.meta,
-      excludeAuth // Pass the excludeAuth flag
+      excludeAuth
     }
   };
 
   return { augmentedConfig, controller, track, requestKey, requestSignal };
 };
-
 
 export const get = (url, config = {}, options = {}) => {
   const { augmentedConfig, controller, track, requestKey } = createRequestConfig(config, options);
@@ -408,16 +436,15 @@ export const postFormData = (url, formData, config = {}, options = {}) => {
     addPendingRequest(key, controller);
   }
 
-  // Ensure multipart/form-data header is set
   augmentedConfig.headers = {
     ...augmentedConfig.headers,
-    'Content-Type': 'multipart/form-data',
   };
-  // Add onUploadProgress if provided in options
-  if (options.onUploadProgress) {
-      augmentedConfig.onUploadProgress = options.onUploadProgress;
-  }
+  delete augmentedConfig.headers['Content-Type'];
+  delete augmentedConfig.headers['content-type'];
 
+  if (options.onUploadProgress) {
+    augmentedConfig.onUploadProgress = options.onUploadProgress;
+  }
 
   return api.post(url, formData, augmentedConfig)
     .finally(() => {
@@ -435,12 +462,12 @@ export const putFormData = (url, formData, config = {}, options = {}) => {
     addPendingRequest(key, controller);
   }
 
-  // Ensure multipart/form-data header is set
   augmentedConfig.headers = {
     ...augmentedConfig.headers,
-    'Content-Type': 'multipart/form-data',
   };
-  // Add onUploadProgress if provided in options
+  delete augmentedConfig.headers['Content-Type'];
+  delete augmentedConfig.headers['content-type'];
+
   if (options.onUploadProgress) {
     augmentedConfig.onUploadProgress = options.onUploadProgress;
   }
@@ -471,8 +498,7 @@ export const createCancellableRequest = (requestFn, options = {}) => {
   const key = requestKey || `cancellable_${Date.now()}_${Math.random()}`;
   addPendingRequest(key, controller);
 
-  // Pass the signal and any meta options from createCancellableRequest
-  const promise = requestFn(signal, options.meta) // Assuming requestFn can accept meta options
+  const promise = requestFn(signal, options.meta)
     .finally(() => {
       if (timeoutId) clearTimeout(timeoutId);
       removePendingRequest(key);
@@ -518,28 +544,21 @@ export const requestWithRetry = async (requestFn, options = {}) => {
         throw error;
       }
 
-      await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+      await new Promise(resolve => setTimeout(resolve, retryDelay * Math.pow(2, attempt)));
     }
   }
 
   throw lastError;
 };
 
-export const info = async (signal) => {
-  // Example of using excludeAuth: if system-settings is a public endpoint
-  return get(`/api/system-settings`, {}, { signal, excludeAuth: true });
-};
-
 // ==================================================
-// Enhanced SECURITY AUTH with Token Management
+// Authentication API Functions
 // ==================================================
 
-export const login = async (data, signal) => {
-  // Login should never include an Authorization header
-  const response = await post("/api/auth/login", data, {}, { signal, requestKey: 'auth_login', excludeAuth: true });
+export const login = async (credentials, signal) => {
+  const response = await post("/api/auth/login", credentials, {}, { signal, requestKey: 'auth_login', excludeAuth: true });
 
-  // Store tokens after successful login
-  if (response.data) {
+  if (response.data?.access_token) {
     const { access_token, refresh_token, expires_in } = response.data;
     setTokens(access_token, refresh_token, expires_in);
   }
@@ -549,9 +568,7 @@ export const login = async (data, signal) => {
 
 export const logout = async (signal) => {
   try {
-    // Assuming getCsrfCookie is a function that might also need excludeAuth if not token-based
-    // await getCsrfCookie(signal, { excludeAuth: true }); // If getCsrfCookie exists and needs this
-    await post("/api/auth/logout", {}, {}, { signal, requestKey: 'auth_logout' }); // This should typically include auth
+    await post("/api/auth/logout", {}, {}, { signal, requestKey: 'auth_logout' });
   } finally {
     clearTokens();
     window.dispatchEvent(new CustomEvent('auth:logout', { detail: 'user_logout' }));
@@ -559,10 +576,8 @@ export const logout = async (signal) => {
 };
 
 export const register = async (userData, signal) => {
-  // Register should never include an Authorization header initially
   const response = await post("/api/auth/register", userData, {}, { signal, requestKey: 'auth_register', excludeAuth: true });
 
-  // Store tokens if registration returns them (often it does)
   if (response.data?.data?.access_token) {
     const { access_token, refresh_token, expires_in } = response.data.data;
     setTokens(access_token, refresh_token, expires_in);
@@ -572,7 +587,6 @@ export const register = async (userData, signal) => {
 };
 
 export const passwordResetRequest = async (data, signal) => {
-  // Password reset request typically doesn't require auth (it's for *getting* back in)
   return post("api/auth/change-password", data, {}, { signal, requestKey: 'auth_password_reset_request', excludeAuth: true });
 };
 
@@ -582,7 +596,6 @@ export const refreshToken = async (signal) => {
     throw new Error('No refresh token available');
   }
 
-  // The refresh endpoint itself should NOT include an access token
   const response = await post("/api/auth/refresh", { refresh_token: refreshToken }, {}, { signal, excludeAuth: true });
 
   if (response.data?.data) {
@@ -602,6 +615,27 @@ export const tokenUtils = {
   getRefreshToken,
   clearTokens,
   isTokenExpired
+};
+
+export const buildFranchisePdfExportUrl = (params = {}) => {
+  const query = new URLSearchParams();
+
+  const appendValue = (key, value) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, String(value));
+  };
+
+  appendValue('type', params.type);
+  appendValue('report_type', params.report_type ?? params.reportType);
+  appendValue('status', params.status);
+  appendValue('start_date', params.start_date ?? params.startDate);
+  appendValue('end_date', params.end_date ?? params.endDate);
+  appendValue('window', params.window ?? params.expiringWindow);
+  appendValue('gender', params.gender ?? params.genderFilter);
+  appendValue('action', params.action);
+
+  const queryString = query.toString();
+  return `${BASE_URL}/api/franchises/export/pdf${queryString ? `?${queryString}` : ''}`;
 };
 
 export default api;
