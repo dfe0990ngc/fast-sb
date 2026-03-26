@@ -456,7 +456,7 @@ class ApplicantController extends Controller {
 
         foreach ($documents as &$document) {
             $documentId = (int)($document['id'] ?? 0);
-            $document['StreamUrl'] = '/fast-sb/api/applicants/' . $applicantId . '/documents/' . $documentId . '/stream';
+            $document['StreamUrl'] = '/api/applicants/' . $applicantId . '/documents/' . $documentId . '/stream';
             $document['Label'] = 'PDF';
         }
         unset($document);
