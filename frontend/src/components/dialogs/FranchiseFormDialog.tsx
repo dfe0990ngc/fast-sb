@@ -25,7 +25,11 @@ import { Check, ChevronsUpDown, X } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import * as api from '../../api/api.js';
  
-const DEFAULT_FORM_DATA: Partial<Franchise> = {
+type FranchiseFormData = Partial<Franchise> & {
+  Driver?: string;
+};
+
+const DEFAULT_FORM_DATA: FranchiseFormData = {
   Name: "",
   Address: "",
   ContactNo: "",
@@ -33,6 +37,7 @@ const DEFAULT_FORM_DATA: Partial<Franchise> = {
   DateIssued: new Date().toISOString().split("T")[0],
   ExpiryDate: "",
   Route: "",
+  Driver: "",
   MakeID: "",
   ChassisNo: "",
   EngineNo: "",
@@ -53,7 +58,7 @@ import { toast } from "sonner";
 interface FranchiseFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSave: (data: Partial<Franchise>) => void;
+  onSave: (data: FranchiseFormData) => void;
   searchApplicants: (searchTerm: string) => Promise<Applicant[]>;
   franchise: Franchise | null;
   makes: Make[];
@@ -61,7 +66,7 @@ interface FranchiseFormDialogProps {
 }
 
 const useFranchiseForm = (franchise: Franchise | null, mode: "create" | "edit") => {
-  const [formData, setFormData] = useState<Partial<Franchise>>(DEFAULT_FORM_DATA);
+  const [formData, setFormData] = useState<FranchiseFormData>(DEFAULT_FORM_DATA);
   
   useEffect(() => {
     if (franchise && mode === "edit") {
@@ -71,7 +76,7 @@ const useFranchiseForm = (franchise: Franchise | null, mode: "create" | "edit") 
     }
   }, [franchise, mode]);
 
-  const handleChange = useCallback((field: keyof Franchise, value: string, setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>) => {
+  const handleChange = useCallback((field: keyof FranchiseFormData, value: string, setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>) => {
     setFormData((prev) => ({ ...prev, [field]: value.trimStart() }));
     setErrors((prev) => ({ ...prev, [field]: "" }));
   }, []);
@@ -391,6 +396,21 @@ const FranchiseFormDialog = memo(({
                   <p className="text-red-500 text-sm">{errors.Route}</p>
                 )}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="driver">Driver</Label>
+              <Input
+                id="driver"
+                placeholder="Enter driver name"
+                disabled={formData.Status === 'drop'}
+                value={formData.Driver || ""}
+                onChange={(e) => handleFormChange("Driver", e.target.value, setErrors)}
+                className={errors.Driver ? "border-red-500" : ""}
+              />
+              {errors.Driver && (
+                <p className="text-red-500 text-sm">{errors.Driver}</p>
+              )}
             </div>
 
             {/* Franchise No + Plate No */}

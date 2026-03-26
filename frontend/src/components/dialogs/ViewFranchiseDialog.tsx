@@ -68,6 +68,7 @@ const ViewFranchiseDialog = memo(({
   const isExpiring = isExpiringSoon(franchise.ExpiryDate, franchise.LatestExpiryDate);
   const isExpired = isExpiredAlready(franchise.ExpiryDate, franchise.LatestExpiryDate);
   const isRenewedRecord = franchise.LatestExpiryDate && franchise.LatestExpiryDate !== franchise.ExpiryDate && franchise.LatestExpiryDate !== '0000-00-00';
+  const driverName = (franchise as Franchise & { Driver?: string }).Driver || 'N/A';
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -138,25 +139,33 @@ const ViewFranchiseDialog = memo(({
 
                 <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
                   <div>
-                    <h4 className="mb-1 font-medium text-sm">Make</h4>
-                    <p className="text-muted-foreground text-sm uppercase">{franchise.MakeName || 'N/A'}</p>
+                    <h4 className="mb-1 font-medium text-sm">Driver</h4>
+                    <p className="text-muted-foreground text-sm uppercase">{driverName}</p>
                   </div>
                   <div>
-                    <h4 className="mb-1 font-medium text-sm">Chassis Number</h4>
-                    <p className="font-mono text-muted-foreground text-sm">{franchise.ChassisNo}</p>
+                    <h4 className="mb-1 font-medium text-sm">Make</h4>
+                    <p className="text-muted-foreground text-sm uppercase">{franchise.MakeName || 'N/A'}</p>
                   </div>
                 </div>
 
                 <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
                   <div>
+                    <h4 className="mb-1 font-medium text-sm">Chassis Number</h4>
+                    <p className="font-mono text-muted-foreground text-sm">{franchise.ChassisNo}</p>
+                  </div>
+                  <div>
                     <h4 className="mb-1 font-medium text-sm">Engine Number</h4>
                     <p className="font-mono text-muted-foreground text-sm uppercase">{franchise.EngineNo}</p>
                   </div>
+                </div>
+
+                <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
                   <div>
                     <h4 className="mb-1 font-medium text-sm">Renewal Count</h4>
                     <p className="text-muted-foreground text-sm">{franchise.RenewalCount || 0} time(s)</p>
                   </div>
                 </div>
+
 
                 <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
                   <div>
