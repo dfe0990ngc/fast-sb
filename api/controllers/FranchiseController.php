@@ -6,6 +6,7 @@ namespace App\controllers;
 use App\core\Database;
 use Exception;
 use App\core\Auth;
+use App\services\franchise\FranchiseDocumentService;
 use DateTime;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -374,6 +375,8 @@ class FranchiseController extends Controller{
             if (!$franchise) {
                 $this->response(false, 'Franchise not found', [], 404);
             }
+
+            (new FranchiseDocumentService())->deleteAllDocuments((int)$id);
 
             // Perform deletion
             Database::query("DELETE FROM franchise_history WHERE FranchiseID = ?",[$id]);
@@ -1816,19 +1819,19 @@ public function exportFranchiseForm(?string $id = null): void {
         return $counts;
     }
 
-    private function buildGenderSummaryText(array $rows, bool $uniqueByApplicant = true, string $labelPrefix = 'Total'): string {
+    private function buildGenderSummaryText(array $rows, bool $uniqueByApplicant = true, string $labelPrefix = 'Franchise Holder By Gender'): string {
         $counts = $this->calculateGenderCounts($rows, $uniqueByApplicant);
         $parts = [];
 
         if ($counts['male'] > 0) {
-            $parts[] = $labelPrefix . ' Male: ' . $counts['male'];
+            $parts[] = ' M(' . $counts['male'].')';
         }
 
         if ($counts['female'] > 0) {
-            $parts[] = $labelPrefix . ' Female: ' . $counts['female'];
+            $parts[] = ' F(' . $counts['female'].')';
         }
 
-        return $parts ? ' | ' . implode(' | ', $parts) : '';
+        return $parts ? $labelPrefix.': ' . implode(' | ', $parts) : '';
     }
 
     private function formatStatusLabel(string $rawStatus, ?string $expiryDate = null, bool $considerExpired = true): string {
@@ -2158,13 +2161,13 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $pdf = $this->createPdfDocument($title, 'Generated Franchise Report');
 
-        // $genderSummary = $this->buildGenderSummaryText($franchises, true, 'Total');
+        $genderSummary = $this->buildGenderSummaryText($franchises, true);
 
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . $this->escapePdfValue($title) . '</p>',
             '<p class="subtitle">' . $this->escapePdfValue($subtitle) . '</p>',
-            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises) . '</p>',
+            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises). ' | ' . $genderSummary . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
                 <th style="width:12%;">DRIVER (OPERATOR)</th>
@@ -2222,13 +2225,13 @@ public function exportFranchiseForm(?string $id = null): void {
         $subtitle = 'Current active franchise units expiring between ' . date('F j, Y') . ' and ' . date('F j, Y', strtotime('+' . $window . ' days'));
         $pdf = $this->createPdfDocument($title, 'Generated Expiring Franchises Report');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
+        $genderSummary = $this->buildGenderSummaryText($rows, true);
 
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             '<p class="subtitle">' . htmlspecialchars($subtitle) . '</p>',
-            '<p class="meta">Total Records: ' . count($rows) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Total Records: ' . count($rows) . ' | '. $this->escapePdfValue($genderSummary) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
                 <th style="width:13%;">OPERATOR</th>
@@ -2283,13 +2286,13 @@ public function exportFranchiseForm(?string $id = null): void {
         $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
         $pdf = $this->createPdfDocument($title, 'Generated Dropped Franchises Report');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
+        $genderSummary = $this->buildGenderSummaryText($rows, true);
 
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             '<p class="subtitle">' . htmlspecialchars($subtitle) . '</p>',
-            '<p class="meta">Total Records: ' . count($rows) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Total Records: ' . count($rows) . '|' . $this->escapePdfValue($genderSummary) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
                 <th style="width:12%;">OPERATOR</th>
@@ -2350,13 +2353,13 @@ public function exportFranchiseForm(?string $id = null): void {
         $dateFilterLabel = $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
         $pdf = $this->createPdfDocument($title, 'Generated Per Holder Franchise Summary');
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
+        $genderSummary = $this->buildGenderSummaryText($rows, true);
 
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
             // '<p class="meta">Total Active Units: ' . $totalActiveUnits . ' | Date Filter: ' . htmlspecialchars($dateFilterLabel) . '</p>',
-            '<p class="meta">Date Filter: ' . htmlspecialchars($dateFilterLabel) . htmlspecialchars($genderSummary) . '</p>',
+            '<p class="meta">Date Filter: ' . htmlspecialchars($dateFilterLabel) . ' | ' . htmlspecialchars($genderSummary) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
                 <th style="width:15%;">OPERATOR</th>
@@ -2409,7 +2412,7 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $dateRangeString = $this->buildDateRangeLabel($startDate, $endDate);
 
-        $genderSummary = $this->buildGenderSummaryText($rows, true, 'Total');
+        $genderSummary = $this->buildGenderSummaryText($rows, true);
 
         $summary = [];
         $grand = ['new' => 0, 'renew' => 0, 'total' => 0];
@@ -2875,7 +2878,7 @@ public function exportFranchiseForm(?string $id = null): void {
     private function generateExpiringFranchisesExcel(array $rows, int $window): void {
         $title = 'FRANCHISES EXPIRING WITHIN ' . $window . ' DAYS';
         $subtitle = 'Current active franchise units expiring between ' . date('F j, Y') . ' and ' . date('F j, Y', strtotime('+' . $window . ' days'));
-        $meta = 'Total Records: ' . count($rows) . $this->buildGenderSummaryText($rows, true, 'Total');
+        $meta = 'Total Records: ' . count($rows) . ' | ' . $this->buildGenderSummaryText($rows, true);
 
         $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Expiring Franchises Report');
         $sheet = $spreadsheet->getActiveSheet();
@@ -2906,7 +2909,7 @@ public function exportFranchiseForm(?string $id = null): void {
     private function generateDroppedMasterlistExcel(array $rows, ?string $startDate = null, ?string $endDate = null): void {
         $title = 'DROPPED FRANCHISE MASTERLIST';
         $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
-        $meta = 'Total Records: ' . count($rows) . $this->buildGenderSummaryText($rows, true, 'Total');
+        $meta = 'Total Records: ' . count($rows) . ' | ' . $this->buildGenderSummaryText($rows, true);
 
         $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Dropped Franchises Report');
         $sheet = $spreadsheet->getActiveSheet();
@@ -2938,7 +2941,7 @@ public function exportFranchiseForm(?string $id = null): void {
     private function generatePerHolderSummaryExcel(array $rows, ?string $startDate = null, ?string $endDate = null): void {
         $totalActiveUnits = array_sum(array_map(static fn (array $row): int => (int)($row['ActiveUnitCount'] ?? 0), $rows));
         $title = 'PER HOLDER SUMMARY OF ACTIVE FRANCHISES (TOTAL FRANCHISES: ' . $totalActiveUnits . ')';
-        $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All') . $this->buildGenderSummaryText($rows, true, 'Total');
+        $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All') . ' | ' .$this->buildGenderSummaryText($rows, true);
 
         $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Per Holder Franchise Summary');
         $sheet = $spreadsheet->getActiveSheet();
@@ -2968,7 +2971,7 @@ public function exportFranchiseForm(?string $id = null): void {
     private function generateSummaryByRouteExcel(array $rows, string $startDate, string $endDate): void {
         $title = 'SUMMARY OF FRANCHISES BY ROUTE';
         $subtitle = $this->buildDateRangeLabel($startDate, $endDate);
-        $meta = trim($this->buildGenderSummaryText($rows, true, 'Total'), ' |');
+        $meta = $this->buildGenderSummaryText($rows, true);
 
         $summary = [];
         $grand = ['new' => 0, 'renew' => 0, 'total' => 0];
@@ -3109,6 +3112,7 @@ public function exportFranchiseForm(?string $id = null): void {
         $franchise = Database::fetch(
             "SELECT 
                 f.*,
+                latestHistory.ExpiryDate as LatestExpiryDate,
                 CONCAT(a.FirstName,' ',a.LastName) as ApplicantName,
                 a.Gender,
                 a.ContactNo,
@@ -3117,6 +3121,11 @@ public function exportFranchiseForm(?string $id = null): void {
                 CONCAT(u1.FirstName, ' ', u1.LastName) as CreatedByName,
                 CONCAT(u2.FirstName, ' ', u2.LastName) as UpdatedByName
             FROM franchises f
+            LEFT JOIN (
+                SELECT FranchiseID, MAX(ExpiryDate) as ExpiryDate
+                FROM franchise_history
+                GROUP BY FranchiseID
+            ) latestHistory ON latestHistory.FranchiseID = f.id
             LEFT JOIN applicants a ON a.id = f.ApplicantID
             LEFT JOIN makes m ON f.MakeID = m.id
             LEFT JOIN users u1 ON f.CreatedBy = u1.UserID
@@ -3125,7 +3134,15 @@ public function exportFranchiseForm(?string $id = null): void {
             [$id]
         );
 
-        return $franchise ?? [];
+        if (!$franchise) {
+            return [];
+        }
+
+        $documents = (new FranchiseDocumentService())->getDocuments((int)$id);
+        $franchise['documents'] = $documents;
+        $franchise['Documents'] = $documents;
+
+        return $franchise;
     }
 
     /**

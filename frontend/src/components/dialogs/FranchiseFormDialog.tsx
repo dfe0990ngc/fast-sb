@@ -1,59 +1,47 @@
-import { useEffect, useState, memo, useCallback } from "react";
-import { Franchise, Make, Applicant } from "../../types/types";
-import { 
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
-import { Textarea } from "../ui/textarea";
-import { Button } from "../ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
-import { Check, ChevronsUpDown, X } from "lucide-react";
-import { useDebounce } from "@/hooks/useDebounce";
-import * as api from '../../api/api.js';
- 
+import { memo, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Check, ChevronsUpDown } from 'lucide-react';
+import { toast } from 'sonner';
+import { Applicant, Franchise, Make } from '../../types/types';
+import * as api from '../../api/api';
+import { useDebounce } from '@/hooks/useDebounce';
+import ApplicantFormDialog from './ApplicantFormDialog';
+import FranchiseDocumentsPanel from './FranchiseDocumentsPanel';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Label } from '../ui/label';
+import { Input } from '../ui/input';
+import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
+
 type FranchiseFormData = Partial<Franchise> & {
   Driver?: string;
+  ApplicantID?: string | number | null;
+  ApplicantName?: string;
+  ContactNo?: string;
+  Address?: string;
 };
 
 const DEFAULT_FORM_DATA: FranchiseFormData = {
-  Name: "",
-  Address: "",
-  ContactNo: "",
-  FranchiseNo: "",
-  DateIssued: new Date().toISOString().split("T")[0],
-  ExpiryDate: "",
-  Route: "",
-  Driver: "",
-  MakeID: "",
-  ChassisNo: "",
-  EngineNo: "",
-  PlateNo: "",
-  ORNo: "",
-  Amount: "",
-  Status: "new",
+  FranchiseNo: '',
+  DateIssued: new Date().toISOString().split('T')[0],
+  ExpiryDate: '',
+  Route: '',
+  Driver: '',
+  MakeID: '',
+  ChassisNo: '',
+  EngineNo: '',
+  PlateNo: '',
+  ORNo: '',
+  Amount: '',
+  Status: 'new',
   ApplicantID: null,
-  ApplicantName: "",
-  LastRenewalDate: "",
-  DropReason: "",
+  ApplicantName: '',
+  ContactNo: '',
+  Address: '',
+  DropReason: '',
 };
-
-// Use the new ApplicantFormDialog
-import ApplicantFormDialog from "./ApplicantFormDialog";
-import { toast } from "sonner";
 
 interface FranchiseFormDialogProps {
   open: boolean;
@@ -62,29 +50,14 @@ interface FranchiseFormDialogProps {
   searchApplicants: (searchTerm: string) => Promise<Applicant[]>;
   franchise: Franchise | null;
   makes: Make[];
-  mode: "create" | "edit";
+  mode: 'create' | 'edit';
 }
 
-const useFranchiseForm = (franchise: Franchise | null, mode: "create" | "edit") => {
-  const [formData, setFormData] = useState<FranchiseFormData>(DEFAULT_FORM_DATA);
-  
-  useEffect(() => {
-    if (franchise && mode === "edit") {
-      setFormData(franchise);
-    } else if (mode === "create") {
-      setFormData(DEFAULT_FORM_DATA);
-    }
-  }, [franchise, mode]);
+function applicantFullName(applicant: Partial<Applicant>) {
+  return [applicant.FirstName, applicant.MiddleName, applicant.LastName].filter(Boolean).join(' ').trim();
+}
 
-  const handleChange = useCallback((field: keyof FranchiseFormData, value: string, setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>) => {
-    setFormData((prev) => ({ ...prev, [field]: value.trimStart() }));
-    setErrors((prev) => ({ ...prev, [field]: "" }));
-  }, []);
-
-  return { formData, handleChange, setFormData };
-};
-
-const FranchiseFormDialog = memo(({
+const FranchiseFormDialog = memo(function FranchiseFormDialog({
   open,
   onClose,
   onSave,
@@ -92,579 +65,540 @@ const FranchiseFormDialog = memo(({
   franchise,
   makes,
   mode,
-}: FranchiseFormDialogProps) => {
-  const { formData, handleChange: handleFormChange, setFormData } = useFranchiseForm(franchise, mode);
+}: FranchiseFormDialogProps) {
+  const [formData, setFormData] = useState<FranchiseFormData>(DEFAULT_FORM_DATA);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const [openApplicant, setOpenApplicant] = useState(false);
-  const [applicantSearch, setApplicantSearch] = useState("");
-  const debouncedSearch = useDebounce(applicantSearch, 500);
+  const [openApplicantPicker, setOpenApplicantPicker] = useState(false);
+  const [applicantSearch, setApplicantSearch] = useState('');
   const [searchedApplicants, setSearchedApplicants] = useState<Applicant[]>([]);
+  const [isLoadingApplicants, setIsLoadingApplicants] = useState(false);
   const [isApplicantCreateFormOpen, setIsApplicantCreateFormOpen] = useState(false);
   const [applicantNameToCreate, setApplicantNameToCreate] = useState('');
 
-  // New states for fetching applicant details
-  const [loadingStates, setLoadingStates] = useState({
-    applicantSearch: false,
-    applicantDetails: false,
-  });
+  const debouncedSearch = useDebounce(applicantSearch, 350);
+  const isEditMode = mode === 'edit';
+  const isDroppedRecord = isEditMode && (franchise?.Status || formData.Status) === 'drop';
 
   useEffect(() => {
-    if (open) {
-      setErrors({}); // Clear errors on open
-      if (mode === 'edit' && franchise && franchise.ApplicantID) {
-        handleFormChange('ApplicantName', `${franchise.ApplicantName}`, setErrors);
-        handleFormChange('ContactNo', franchise.ContactNo || '', setErrors);
-        handleFormChange('Address', franchise.Address || '', setErrors);
-      } else if (mode === 'create') {
-        // Reset form for create mode
-        setFormData(DEFAULT_FORM_DATA);
-      }
-    }
-  }, [open, mode, franchise, handleFormChange, setFormData]);
-
-  // Set default last renewal date when status is renew
-  // useEffect(() => {
-  //   if(formData.Status === 'renew' && (!formData.LastRenewalDate || formData.LastRenewalDate === '0000-00-00')){
-  //     const dt = new Date();
-  //     // Directly call handleFormChange since it's stable now
-  //     handleFormChange('LastRenewalDate', dt.toISOString().split("T")[0], setErrors);
-  //   }
-  // },[formData.Status, formData.LastRenewalDate, handleFormChange]);
-
-  const validate = useCallback((): boolean => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.FranchiseNo?.trim()) newErrors.FranchiseNo = "Franchise number is required";
-    if (!formData.DateIssued) newErrors.DateIssued = "Date issued is required";
-    if (!formData.Route?.trim()) newErrors.Route = "Route is required";
-    if (!formData.MakeID) newErrors.MakeID = "Make is required";
-    if (!formData.ChassisNo?.trim()) newErrors.ChassisNo = "Chassis number is required";
-    if (!formData.EngineNo?.trim()) newErrors.EngineNo = "Engine number is required";
-    if (!formData.PlateNo?.trim()) newErrors.PlateNo = "Plate number is required";
-
-    if (formData.Status === 'renew' && !formData.ExpiryDate) {
-      newErrors.ExpiryDate = 'Expiry date is required for renewal';
+    if (!open) {
+      return;
     }
 
-    // if (mode === 'create' && formData.Status === 'renew' && !formData.LastRenewalDate) {
-    //   newErrors.LastRenewalDate = 'Last renewal date is required';
-    // }
-
-    if (formData.ExpiryDate && formData.DateIssued) {
-      const issued = new Date(formData.DateIssued);
-      const expiry = new Date(formData.ExpiryDate);
-      if (expiry < issued)
-        newErrors.ExpiryDate = "Expiry date must be after date issued";
+    if (franchise && isEditMode) {
+      setFormData({
+        ...DEFAULT_FORM_DATA,
+        ...franchise,
+        Driver: (franchise as Franchise & { Driver?: string }).Driver || '',
+        ApplicantName: franchise.ApplicantName || '',
+        ContactNo: franchise.ContactNo || '',
+        Address: franchise.Address || '',
+      });
+    } else {
+      setFormData(DEFAULT_FORM_DATA);
     }
 
-    // if (formData.LastRenewalDate && formData.DateIssued) {
-    //   const issued = new Date(formData.DateIssued);
-    //   const lrd = new Date(formData.LastRenewalDate);
-    //   if (lrd < issued)
-    //     newErrors.LastRenewalDate = "Last Renewal date must be after date issued";
-    // }
-
-    // if (formData.LastRenewalDate && formData.ExpiryDate) {
-    //   const exp = new Date(formData.ExpiryDate);
-    //   const lrd = new Date(formData.LastRenewalDate);
-    //   if (lrd >= exp)
-    //     newErrors.LastRenewalDate = "Last Renewal date must less than expire date";
-    // }
-
-    if (formData.Status === "drop" && !formData.DropReason?.trim()) {
-      newErrors.DropReason = 'Drop reason is required when status is "drop"';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [formData, mode]);
-
-  const handleSubmit = useCallback(() => {
-    if (validate()) onSave(formData);
-  }, [validate, onSave, formData]);
+    setErrors({});
+    setApplicantSearch('');
+    setSearchedApplicants([]);
+    setOpenApplicantPicker(false);
+  }, [franchise, isEditMode, open]);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadApplicants = async () => {
-      setLoadingStates(prev => ({ ...prev, applicantSearch: true }));
-      if (debouncedSearch) {
-        const results = await searchApplicants(debouncedSearch);
-        setSearchedApplicants(results);
-      } else {
+      if (!debouncedSearch.trim()) {
         setSearchedApplicants([]);
+        return;
       }
-      setLoadingStates(prev => ({ ...prev, applicantSearch: false }));
-    };
-    loadApplicants();
-  }, [debouncedSearch, searchApplicants]);
-  const handleFormSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    handleSubmit();
-  }, [handleSubmit]);
 
-  const handleApplicantCreate = useCallback((name: string) => {
-    setApplicantNameToCreate(name);
-    setIsApplicantCreateFormOpen(true);
-    setOpenApplicant(false); // Close the applicant search popover
+      setIsLoadingApplicants(true);
+      try {
+        const results = await searchApplicants(debouncedSearch);
+        if (isMounted) {
+          setSearchedApplicants(results);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingApplicants(false);
+        }
+      }
+    };
+
+    void loadApplicants();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [debouncedSearch, searchApplicants]);
+
+  const setField = useCallback((field: keyof FranchiseFormData, value: string | number | null) => {
+    setFormData((previous) => ({ ...previous, [field]: value }));
+    setErrors((previous) => ({ ...previous, [field]: '' }));
   }, []);
 
-  
+  const handleApplicantSelect = useCallback((applicant: Applicant) => {
+    setFormData((previous) => ({
+      ...previous,
+      ApplicantID: applicant.id,
+      ApplicantName: applicantFullName(applicant),
+      ContactNo: applicant.ContactNo || '',
+      Address: applicant.Address || '',
+    }));
+    setErrors((previous) => ({ ...previous, ApplicantID: '' }));
+    setOpenApplicantPicker(false);
+    setApplicantSearch('');
+  }, []);
 
   const handleApplicantCreateSuccess = useCallback(async (data: Partial<Applicant>) => {
     try {
       const response = await api.post('/api/applicants', data);
-      
-      if (response.data.success) {
-        const newApplicant = response.data.applicant;
 
-        // Add the new applicant to the search results to make it visible and checked
-        setSearchedApplicants(prev => [newApplicant, ...prev.filter(a => a.id !== newApplicant.id)]);
-
-        toast.success('Applicant created successfully.');
-        setIsApplicantCreateFormOpen(false);
-
-        handleFormChange('ApplicantName', `${newApplicant.FirstName} ${newApplicant.LastName}`, setErrors);
-        handleFormChange('ApplicantID', newApplicant.id.toString(), setErrors);
-        handleFormChange('ContactNo', newApplicant.ContactNo || '', setErrors);
-        handleFormChange('Address', newApplicant.Address || '', setErrors);
-        setApplicantSearch("");
-        setOpenApplicant(false);
-      } else {
+      if (!response.data.success) {
         toast.error(response.data.message || 'Failed to create applicant.');
+        return;
       }
+
+      const newApplicant = response.data.applicant as Applicant;
+      setSearchedApplicants((previous) => [newApplicant, ...previous.filter((item) => item.id !== newApplicant.id)]);
+      handleApplicantSelect(newApplicant);
+      setIsApplicantCreateFormOpen(false);
+      toast.success('Applicant created successfully.');
     } catch (error) {
-      toast.error('An unexpected error occurred.');
+      toast.error('An unexpected error occurred while creating the applicant.');
     }
-  },[handleFormChange]);
+  }, [handleApplicantSelect]);
+
+  const validate = useCallback(() => {
+    const nextErrors: Record<string, string> = {};
+
+    if (!formData.ApplicantID) nextErrors.ApplicantID = 'Owner is required';
+    if (!formData.FranchiseNo?.toString().trim()) nextErrors.FranchiseNo = 'Franchise number is required';
+    if (!formData.DateIssued) nextErrors.DateIssued = 'Date issued is required';
+    if (!formData.Route?.toString().trim()) nextErrors.Route = 'Route is required';
+    if (!formData.MakeID) nextErrors.MakeID = 'Make is required';
+    if (!formData.ChassisNo?.toString().trim()) nextErrors.ChassisNo = 'Chassis number is required';
+    if (!formData.EngineNo?.toString().trim()) nextErrors.EngineNo = 'Engine number is required';
+    if (!formData.PlateNo?.toString().trim()) nextErrors.PlateNo = 'Plate number is required';
+
+    if (mode === 'create' && !formData.Status) {
+      nextErrors.Status = 'Status is required';
+    }
+
+    if ((mode === 'create' ? formData.Status : franchise?.Status) === 'renew' && !formData.ExpiryDate) {
+      nextErrors.ExpiryDate = 'Expiry date is required for renewal';
+    }
+
+    if (formData.ExpiryDate && formData.DateIssued) {
+      const issued = new Date(formData.DateIssued);
+      const expiry = new Date(formData.ExpiryDate);
+      if (expiry < issued) {
+        nextErrors.ExpiryDate = 'Expiry date must be after date issued';
+      }
+    }
+
+    if ((mode === 'create' ? formData.Status : franchise?.Status) === 'drop' && !formData.DropReason?.toString().trim()) {
+      nextErrors.DropReason = 'Drop reason is required for dropped records';
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }, [formData, franchise?.Status, mode]);
+
+  const handleSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!validate()) {
+      return;
+    }
+
+    onSave(formData);
+  }, [formData, onSave, validate]);
+
+  const applicantButtonText = useMemo(() => {
+    if (formData.ApplicantName?.trim()) {
+      return formData.ApplicantName;
+    }
+
+    return 'Select owner';
+  }, [formData.ApplicantName]);
+
+  const showDropReason = (mode === 'create' && formData.Status === 'drop') || (mode === 'edit' && franchise?.Status === 'drop');
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent 
-        className="sm:max-w-2xl max-h-[90vh] overflow-hidden"
-        onInteractOutside={(e) => {
-          e.preventDefault();
-        }}
-      >
-        <form onSubmit={handleFormSubmit}>
-          <DialogHeader className="px-3 sm:px-6 pt-6">
-            <DialogTitle>
-              {mode === "create" ? "Create New Franchise" : "Edit Franchise"}
-            </DialogTitle>
-            <DialogDescription>
-              {mode === "create"
-                ? "Add a new franchise record to the system."
-                : "Modify existing franchise details."}
-            </DialogDescription>
-          </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent
+          className="sm:max-w-4xl max-h-[92vh] overflow-hidden"
+          onInteractOutside={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <form onSubmit={handleSubmit} className="flex flex-col h-full">
+            <DialogHeader className="px-3 sm:px-6 pt-6">
+              <DialogTitle>{mode === 'create' ? 'Create New Franchise' : 'Edit Franchise'}</DialogTitle>
+              <DialogDescription>
+                {mode === 'create'
+                  ? 'Create the franchise first, then attach driver authorization PDFs when needed.'
+                  : 'Update franchise details and manage the optional driver authorization PDFs.'}
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="space-y-4 p-3 sm:p-6 max-h-[calc(90vh-8rem)] overflow-y-auto">
-            {/* Owner and Contact */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="name">
-                  Owner Name <span className="text-red-500">*</span>
-                </Label>
-                <Popover open={openApplicant} onOpenChange={setOpenApplicant} modal={true}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={openApplicant}
-                      className="justify-between w-full"
-                      disabled={mode !== 'create'}
-                    >
-                      {formData.ApplicantName || "Select applicant..."}
-                      <div className="flex justify-end items-center gap-1 w-auto">
-                        {formData.ApplicantID ? (
-                          <Button type="button" variant="ghost" className="z-20 opacity-50 w-4 h-4 text-red-600 cursor-pointer shrink-0" onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleFormChange("ApplicantName", "", setErrors);
-                              handleFormChange("ApplicantID", "", setErrors);
-                              handleFormChange("ContactNo", "", setErrors);
-                              handleFormChange("Address", "", setErrors);
-                              setOpenApplicant(false);
-                          }}>
-                            <X />
-                          </Button>
-                        ): (
-                          <ChevronsUpDown className="opacity-50 ml-2 w-4 h-4 shrink-0" />
-                        )}
-                      </div>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="shadow-xl p-0 w-[--radix-popover-trigger-width]">
-                    <Command className="border-2 border-gray-300">
-                      <CommandInput
-                        placeholder="Search by name..."
-                        className="border-0 outline-0 focus-visible:ring-0 ring-offset-0 focus-visible:ring-offset-0 h-9"
-                        value={applicantSearch}
-                        onValueChange={setApplicantSearch}
-                      />
-                      <CommandEmpty>
-                        {!loadingStates.applicantSearch && debouncedSearch && searchedApplicants.length === 0 && (
-                          <Button onClick={() => handleApplicantCreate(debouncedSearch)} variant="ghost">Create "{debouncedSearch}"</Button>
-                        )}
-                      </CommandEmpty>
-                      <CommandGroup className="max-h-60 overflow-y-auto">
-                        {loadingStates.applicantSearch && (
-                          <div className="p-2 text-muted-foreground text-sm text-center">
-                            Loading...
-                          </div>
-                        )}
-                        {!loadingStates.applicantSearch && !debouncedSearch && (
-                          <div className="p-2 text-muted-foreground text-sm text-center">
-                            Start typing to search for an applicant.
-                          </div>
-                        )}
-                        {searchedApplicants.map((applicant) => (
-                          <CommandItem
-                            key={applicant.id}
-                            value={`${applicant.FirstName} ${applicant.LastName}`}
-                            onSelect={() => {
-                              const applicantName = `${applicant.FirstName} ${applicant.LastName}`;
-                              handleFormChange('ApplicantName', applicantName, setErrors);
-                              handleFormChange('ApplicantID', applicant.id.toString(), setErrors);
-                              handleFormChange('ContactNo', applicant.ContactNo, setErrors);
-                              handleFormChange('Address', applicant.Address, setErrors);
-                              setOpenApplicant(false);
-                            }}
-                          >
-                            <Check className={`mr-2 h-4 w-4 ${formData.ApplicantID === applicant.id.toString() ? "opacity-100" : "opacity-0"}`} />
-                            {applicant.FirstName} {applicant.LastName}{applicant.Gender ? ` (${applicant.Gender})` : ""}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="contact">Contact Number</Label>
-                <Input
-                  id="contact"
-                  placeholder="e.g., +639123456789"
-                  readOnly={true}
-                  value={formData.ContactNo || ""}
-                  onChange={(e) => handleFormChange("ContactNo", e.target.value, setErrors)}
-                  className={errors.ContactNo ? "border-red-500" : ""}
-                />
-                {errors.ContactNo && (
-                  <p className="text-red-500 text-sm">{errors.ContactNo}</p>
-                )}
-              </div>
-            </div>
-
-
-            {/* Address + Route */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              {/* Address */}
-              <div className="space-y-2">
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  readOnly={true}
-                  placeholder="e.g., Zone III"
-                  value={formData.Address || ""}
-                  onChange={(e) => handleFormChange("Address", e.target.value, setErrors)}
-                  className={errors.Address ? "border-red-500" : ""}
-                />
-                {errors.Address && (
-                  <p className="text-red-500 text-sm">{errors.Address}</p>
-                )}
-              </div>
-
-              {/* Route */}
-              <div className="space-y-2">
-                <Label htmlFor="route">
-                  Route <span className="text-red-500">*</span>
-                </Label>
-                <Select
-                  value={formData.Route || ""}
-                  disabled={formData.Status === 'drop'}
-                  onValueChange={(value) => handleFormChange('Route', value, setErrors)}
-                >
-                  <SelectTrigger id="route" className={errors.Route ? 'border-red-500' : ''}>
-                    <SelectValue placeholder="Select Route" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="North Bound">North Bound</SelectItem>
-                    <SelectItem value="South Bound">South Bound</SelectItem>
-                    <SelectItem value="Junction">Junction</SelectItem>
-                  </SelectContent>
-                </Select>
-                {errors.Route && (
-                  <p className="text-red-500 text-sm">{errors.Route}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="driver">Driver</Label>
-              <Input
-                id="driver"
-                placeholder="Enter driver name"
-                disabled={formData.Status === 'drop'}
-                value={formData.Driver || ""}
-                onChange={(e) => handleFormChange("Driver", e.target.value, setErrors)}
-                className={errors.Driver ? "border-red-500" : ""}
-              />
-              {errors.Driver && (
-                <p className="text-red-500 text-sm">{errors.Driver}</p>
-              )}
-            </div>
-
-            {/* Franchise No + Plate No */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="franchise-no">
-                  Franchise Number <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="franchise-no"
-                  placeholder="e.g., 000-0000"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.FranchiseNo || ""}
-                  onChange={(e) => handleFormChange("FranchiseNo", e.target.value, setErrors)}
-                  className={errors.FranchiseNo ? "border-red-500" : ""}
-                />
-                {errors.FranchiseNo && (
-                  <p className="text-red-500 text-sm">{errors.FranchiseNo}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="plate-no">
-                  Plate Number <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="plate-no"
-                  placeholder="e.g., ABC-1234"
-                  value={formData.PlateNo || ""}
-                  disabled={formData.Status === 'drop'}
-                  onChange={(e) => handleFormChange("PlateNo", e.target.value, setErrors)}
-                  className={errors.PlateNo ? "border-red-500" : ""}
-                />
-                {errors.PlateNo && (
-                  <p className="text-red-500 text-sm">{errors.PlateNo}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Make + Status */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              
-              <div className="space-y-2">
-                <Label htmlFor="make">
-                  Make <span className="text-red-500">*</span>
-                </Label>
-                <Select
-                  value={formData.MakeID ? String(formData.MakeID) : ''}
-                  disabled={formData.Status === 'drop'}
-                  onValueChange={(value) => handleFormChange('MakeID', value, setErrors)}
-                >
-                  <SelectTrigger  id="make" className={errors.MakeID ? 'border-red-500' : ''}>
-                    <SelectValue placeholder="Select make" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60 overflow-y-auto">
-                    {makes.map((make) => (
-                      <SelectItem key={make.id} value={String(make.id)}>
-                        {make.Name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {errors.MakeID && (
-                  <p className="text-red-500 text-sm">{errors.MakeID}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.Status || "new"}
-                  onValueChange={(value) => handleFormChange("Status", value, setErrors)}
-                  disabled={true}
-                >
-                  <SelectTrigger id="status">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="renew">Renew</SelectItem>
-                    <SelectItem value="drop">Drop</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Chassis + Engine */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="chassis">
-                  Chassis Number <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="chassis"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.ChassisNo || ""}
-                  onChange={(e) => handleFormChange("ChassisNo", e.target.value, setErrors)}
-                  className={errors.ChassisNo ? "border-red-500" : ""}
-                />
-                {errors.ChassisNo && (
-                  <p className="text-red-500 text-sm">{errors.ChassisNo}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="engine">
-                  Engine Number <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="engine"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.EngineNo || ""}
-                  onChange={(e) => handleFormChange("EngineNo", e.target.value, setErrors)}
-                  className={errors.EngineNo ? "border-red-500" : ""}
-                />
-                {errors.EngineNo && (
-                  <p className="text-red-500 text-sm">{errors.EngineNo}</p>
-                )}
-              </div>
-            </div>
-
-            {/* OR No + Amount */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="or-no">
-                  OR Number
-                </Label>
-                <Input
-                  id="or-no"
-                  placeholder="e.g., 1234567"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.ORNo || ""}
-                  onChange={(e) => handleFormChange("ORNo", e.target.value, setErrors)}
-                  className={errors.ORNo ? "border-red-500" : ""}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="amount">
-                  Amount
-                </Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  disabled={formData.Status === 'drop'}
-                  placeholder="e.g., 150.00"
-                  value={formData.Amount || ""}
-                  onChange={(e) => handleFormChange("Amount", e.target.value, setErrors)}
-                  className={errors.Amount ? "border-red-500" : ""}
-                />
-              </div>
-            </div>
-
-            {/* Dates */}
-            <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="date-issued">
-                  Date Issued <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="date-issued"
-                  type="date"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.DateIssued || ""}
-                  onChange={(e) => handleFormChange("DateIssued", e.target.value, setErrors)}
-                  className={errors.DateIssued ? "border-red-500" : ""}
-                />
-                {errors.DateIssued && (
-                  <p className="text-red-500 text-sm">{errors.DateIssued}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="expiry-date">Expiry Date</Label>
-                <Input
-                  id="expiry-date"
-                  type="date"
-                  disabled={formData.Status === 'drop'}
-                  value={formData.ExpiryDate || ""}
-                  onChange={(e) => handleFormChange("ExpiryDate", e.target.value, setErrors)}
-                  className={errors.ExpiryDate ? "border-red-500" : ""}
-                />
-                {errors.ExpiryDate && (
-                  <p className="text-red-500 text-sm">{errors.ExpiryDate}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Renewal Date */}
-            {/* {formData.Status === 'renew' && <>
-              <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="last-renewal-date">
-                    Last Renewal Date
-                  </Label>
-                  <Input
-                    id="last-renewal-date"
-                    type="date"
-                    value={formData.LastRenewalDate || ""}
-                    onChange={(e) => handleFormChange("LastRenewalDate", e.target.value, setErrors)}
-                    className={errors.LastRenewalDate ? "border-red-500" : ""}
-                  />
-                  {errors.LastRenewalDate && (
-                    <p className="text-red-500 text-sm">{errors.LastRenewalDate}</p>
-                  )}
+            <div className="space-y-5 p-3 sm:p-6 max-h-[calc(92vh-8rem)] overflow-y-auto">
+              <section className="space-y-4 p-4 border rounded-2xl">
+                <div>
+                  <h3 className="font-semibold text-base">Owner Information</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Select an existing applicant, or create one without leaving this form.
+                  </p>
                 </div>
-              </div>
-            </>} */}
 
-            {/* Drop reason */}
-            {formData.Status === "drop" && (
-              <div className="space-y-2">
-                <Label htmlFor="drop-reason">
-                  Drop Reason <span className="text-red-500">*</span>
-                </Label>
-                <Textarea
-                  id="drop-reason"
-                  placeholder="Explain the reason for dropping this franchise"
-                  value={formData.DropReason || ""}
-                  onChange={(e) => handleFormChange("DropReason", e.target.value, setErrors)}
-                  className={errors.DropReason ? "border-red-500" : ""}
+                <div className="gap-4 grid grid-cols-1 lg:grid-cols-[1.3fr,1fr,1fr]">
+                  <div className="space-y-2">
+                    <Label>
+                      Owner Name <span className="text-red-500">*</span>
+                    </Label>
+
+                    <Popover open={openApplicantPicker} onOpenChange={setOpenApplicantPicker}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          className={`w-full justify-between ${errors.ApplicantID ? 'border-red-500' : ''}`}
+                        >
+                          <span className="text-left truncate">{applicantButtonText}</span>
+                          <ChevronsUpDown className="opacity-60 ml-2 w-4 h-4 shrink-0" />
+                        </Button>
+                      </PopoverTrigger>
+
+                      <PopoverContent className="p-0 w-[min(92vw,520px)]" align="start">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="Search applicant..."
+                            value={applicantSearch}
+                            onValueChange={setApplicantSearch}
+                          />
+
+                          {isLoadingApplicants ? (
+                            <div className="px-4 py-6 text-muted-foreground text-sm">Searching applicants...</div>
+                          ) : null}
+
+                          <CommandEmpty className="px-3 py-4 text-sm">
+                            <div className="space-y-3">
+                              <p>No applicant found.</p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="bg-[#008ea2] hover:bg-[#007a8b]"
+                                onClick={() => {
+                                  setApplicantNameToCreate(applicantSearch.trim());
+                                  setIsApplicantCreateFormOpen(true);
+                                  setOpenApplicantPicker(false);
+                                }}
+                              >
+                                Create applicant
+                              </Button>
+                            </div>
+                          </CommandEmpty>
+
+                          <CommandGroup className="max-h-72 overflow-y-auto">
+                            {searchedApplicants.map((applicant) => {
+                              const label = applicantFullName(applicant);
+
+                              return (
+                                <CommandItem
+                                  key={applicant.id}
+                                  value={`${applicant.id}`}
+                                  onSelect={() => handleApplicantSelect(applicant)}
+                                  className="flex justify-between items-start gap-3"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-medium truncate">{label}</div>
+                                    <div className="text-muted-foreground text-xs truncate">
+                                      {[applicant.ContactNo, applicant.Address].filter(Boolean).join(' • ')}
+                                    </div>
+                                  </div>
+
+                                  <Check
+                                    className={`h-4 w-4 ${String(formData.ApplicantID) === String(applicant.id) ? 'opacity-100' : 'opacity-0'}`}
+                                  />
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+
+                    {errors.ApplicantID ? <p className="text-red-500 text-sm">{errors.ApplicantID}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="owner-contact">Contact Number</Label>
+                    <Input id="owner-contact" value={formData.ContactNo || ''} readOnly className="bg-muted/40" />
+                  </div>
+
+                  <div className="space-y-2 lg:col-span-1">
+                    <Label htmlFor="owner-address">Address</Label>
+                    <Input id="owner-address" value={formData.Address || ''} readOnly className="bg-muted/40" />
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-4 p-4 border rounded-2xl">
+                <div>
+                  <h3 className="font-semibold text-base">Franchise Details</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Keep the core details clear and consistent for list, print, and export views.
+                  </p>
+                </div>
+
+                {isDroppedRecord ? (
+                  <div className="bg-amber-50 p-3 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                    This franchise is already marked as dropped. Only the drop reason can be updated here.
+                  </div>
+                ) : null}
+
+                <div className="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="franchise-no">
+                      Franchise Number <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="franchise-no"
+                      value={formData.FranchiseNo || ''}
+                      onChange={(event) => setField('FranchiseNo', event.target.value.toUpperCase())}
+                      className={errors.FranchiseNo ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.FranchiseNo ? <p className="text-red-500 text-sm">{errors.FranchiseNo}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="date-issued">
+                      Date Issued <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="date-issued"
+                      type="date"
+                      value={formData.DateIssued || ''}
+                      onChange={(event) => setField('DateIssued', event.target.value)}
+                      className={errors.DateIssued ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.DateIssued ? <p className="text-red-500 text-sm">{errors.DateIssued}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="status">
+                      Status {mode === 'create' ? <span className="text-red-500">*</span> : null}
+                    </Label>
+                    <Select
+                      value={String(mode === 'create' ? formData.Status || 'new' : franchise?.Status || 'new')}
+                      onValueChange={(value) => setField('Status', value)}
+                      disabled={mode === 'edit'}
+                    >
+                      <SelectTrigger id="status" className={errors.Status ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">New</SelectItem>
+                        <SelectItem value="renew">Renew</SelectItem>
+                        <SelectItem value="drop">Drop</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {mode === 'edit' ? (
+                      <p className="text-muted-foreground text-xs">
+                        Renewal and drop actions are managed from the dedicated franchise actions.
+                      </p>
+                    ) : null}
+                    {errors.Status ? <p className="text-red-500 text-sm">{errors.Status}</p> : null}
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2 xl:col-span-1">
+                    <Label htmlFor="route">
+                      Route <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="route"
+                      value={formData.Route || ''}
+                      onChange={(event) => setField('Route', event.target.value.toUpperCase())}
+                      className={errors.Route ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.Route ? <p className="text-red-500 text-sm">{errors.Route}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="make">
+                      Make <span className="text-red-500">*</span>
+                    </Label>
+                    <Select
+                      value={String(formData.MakeID || '')}
+                      onValueChange={(value) => setField('MakeID', value)}
+                      disabled={isDroppedRecord}
+                    >
+                      <SelectTrigger id="make" className={errors.MakeID ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select make" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60 overflow-y-auto">
+                        {makes.map((make) => (
+                          <SelectItem key={make.id} value={String(make.id)}>
+                            {make.Name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.MakeID ? <p className="text-red-500 text-sm">{errors.MakeID}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="plate-no">
+                      Plate Number <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="plate-no"
+                      value={formData.PlateNo || ''}
+                      onChange={(event) => setField('PlateNo', event.target.value.toUpperCase())}
+                      className={errors.PlateNo ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.PlateNo ? <p className="text-red-500 text-sm">{errors.PlateNo}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="expiry-date">Expiry Date</Label>
+                    <Input
+                      id="expiry-date"
+                      type="date"
+                      value={formData.ExpiryDate || ''}
+                      onChange={(event) => setField('ExpiryDate', event.target.value)}
+                      className={errors.ExpiryDate ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.ExpiryDate ? <p className="text-red-500 text-sm">{errors.ExpiryDate}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="or-no">OR Number</Label>
+                    <Input
+                      id="or-no"
+                      value={formData.ORNo || ''}
+                      onChange={(event) => setField('ORNo', event.target.value.toUpperCase())}
+                      disabled={isDroppedRecord}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="amount">Amount</Label>
+                    <Input
+                      id="amount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={formData.Amount || ''}
+                      onChange={(event) => setField('Amount', event.target.value)}
+                      disabled={isDroppedRecord}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-4 p-4 border rounded-2xl">
+                <div>
+                  <h3 className="font-semibold text-base">Vehicle and Authorized Driver</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Driver authorization PDFs are optional and belong to the franchise record.
+                  </p>
+                </div>
+
+                <div className="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="chassis-no">
+                      Chassis Number <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="chassis-no"
+                      value={formData.ChassisNo || ''}
+                      onChange={(event) => setField('ChassisNo', event.target.value.toUpperCase())}
+                      className={errors.ChassisNo ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.ChassisNo ? <p className="text-red-500 text-sm">{errors.ChassisNo}</p> : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="engine-no">
+                      Engine Number <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="engine-no"
+                      value={formData.EngineNo || ''}
+                      onChange={(event) => setField('EngineNo', event.target.value.toUpperCase())}
+                      className={errors.EngineNo ? 'border-red-500' : ''}
+                      disabled={isDroppedRecord}
+                    />
+                    {errors.EngineNo ? <p className="text-red-500 text-sm">{errors.EngineNo}</p> : null}
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2 xl:col-span-1">
+                    <Label htmlFor="driver-name">Authorized Driver</Label>
+                    <Input
+                      id="driver-name"
+                      value={formData.Driver || ''}
+                      onChange={(event) => setField('Driver', event.target.value.toUpperCase())}
+                      placeholder="Enter authorized driver name"
+                      disabled={isDroppedRecord}
+                    />
+                  </div>
+                </div>
+
+                {showDropReason ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="drop-reason">
+                      Drop Reason <span className="text-red-500">*</span>
+                    </Label>
+                    <Textarea
+                      id="drop-reason"
+                      value={formData.DropReason || ''}
+                      onChange={(event) => setField('DropReason', event.target.value)}
+                      rows={4}
+                      className={errors.DropReason ? 'border-red-500' : ''}
+                    />
+                    {errors.DropReason ? <p className="text-red-500 text-sm">{errors.DropReason}</p> : null}
+                  </div>
+                ) : null}
+
+                <FranchiseDocumentsPanel
+                  franchiseId={franchise?.id ?? null}
+                  initialDocuments={((franchise as any)?.documents || (franchise as any)?.Documents || []) as any[]}
                 />
-                {errors.DropReason && (
-                  <p className="text-red-500 text-sm">{errors.DropReason}</p>
-                )}
-              </div>
-            )}
-          </div>
+              </section>
+            </div>
 
-          <DialogFooter className="bottom-0 sticky flex sm:flex-row flex-col justify-end gap-2 bg-white p-6 border-t">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className="bg-[#008ea2] hover:bg-[#007a8b]"
-            >
-              {mode === "create" ? "Create Franchise" : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+            <DialogFooter className="bottom-0 sticky flex sm:flex-row flex-col sm:justify-end gap-2 bg-white p-6 border-t">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" className="bg-[#008ea2] hover:bg-[#007a8b]">
+                {mode === 'create' ? 'Create Franchise' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {/* Render the ApplicantCreateDialog */}
       <ApplicantFormDialog
         open={isApplicantCreateFormOpen}
         onClose={() => setIsApplicantCreateFormOpen(false)}
         onSave={handleApplicantCreateSuccess}
-        initialName={applicantNameToCreate}
         applicant={null}
         mode="create"
+        initialName={applicantNameToCreate}
       />
-    </Dialog>
+    </>
   );
 });
 

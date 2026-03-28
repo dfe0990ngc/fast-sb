@@ -119,7 +119,7 @@ function getTypeLabel(type: ExportTypeOption) {
     case 'summaryByRoute':
       return 'Summary By Route';
     case 'activeHolders':
-      return 'Active Franchise Holders';
+      return 'Active Units';
     case 'expiring':
       return 'Expiring Franchises';
     case 'droppedMasterlist':

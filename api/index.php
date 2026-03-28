@@ -35,6 +35,7 @@ use App\controllers\UserController;
 use App\controllers\SettingsController;
 use App\controllers\DashboardController;
 use App\controllers\FranchiseController;
+use App\controllers\FranchiseDocumentController;
 use App\controllers\ApplicantController;
 
 $router = new Router();
@@ -82,6 +83,9 @@ $router->get('/api/franchises/export/pdf', [FranchiseController::class, 'exportP
 $router->get('/api/franchises/export/summary-by-route/pdf', [FranchiseController::class, 'exportSummaryByRoutePDF'], [AuthMiddleware::class]);
 $router->get('/api/franchises/{id}/export-form', [FranchiseController::class, 'exportFranchiseForm'], [AuthMiddleware::class]);
 $router->get('/api/franchises/export/excel', [FranchiseController::class, 'exportExcel'], [AuthMiddleware::class]);
+$router->post('/api/franchises/{id}/documents', [FranchiseDocumentController::class, 'uploadDocuments'], [AuthMiddleware::class]);
+$router->get('/api/franchises/{id}/documents/{documentId}/stream', [FranchiseDocumentController::class, 'streamDocument'], [AuthMiddleware::class]);
+$router->delete('/api/franchises/{id}/documents/{documentId}', [FranchiseDocumentController::class, 'deleteDocument'], [AuthMiddleware::class]);
 
 // Applicant Routes (require authentication)
 $router->get('/api/applicants', [ApplicantController::class, 'index'], [AuthMiddleware::class]);
