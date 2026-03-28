@@ -7,6 +7,15 @@ use App\core\Database;
 use Exception;
 use App\core\Auth;
 use DateTime;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class FranchiseController extends Controller{
     
@@ -1039,6 +1048,71 @@ public function exportFranchiseForm(?string $id = null): void {
         }
     }
 
+
+    public function exportExcel(): void {
+        $this->checkPermission(['Admin', 'Editor', 'Viewer']);
+
+        $status = strtolower(trim((string)($_GET['status'] ?? 'all')));
+        $reportTypeRaw = (string)($_GET['report_type'] ?? 'report');
+        $reportType = $this->normalizeReportType($reportTypeRaw, $status);
+        $window = $this->normalizeExpiringWindow((int)($_GET['window'] ?? $this->extractExpiringWindowFromReportType($reportTypeRaw)));
+        $genderFilter = $this->normalizeGenderExportFilter($_GET['gender_filter'] ?? 'all');
+        $startDate = $this->normalizeOptionalDate($_GET['start_date'] ?? null);
+        $endDate = $this->normalizeOptionalDate($_GET['end_date'] ?? null);
+
+        if ($this->reportRequiresDateRange($reportType) && (!$startDate || !$endDate)) {
+            $this->response(false, 'Start date and end date are required for this Excel export.', [], 400);
+            return;
+        }
+
+        if (!$startDate) {
+            $endDate = null;
+        }
+
+        if ($startDate && $endDate && strtotime($endDate) < strtotime($startDate)) {
+            $this->response(false, 'End date cannot be earlier than the start date.', [], 400);
+            return;
+        }
+
+        try {
+            switch ($reportType) {
+                case 'summaryByRoute':
+                    $rows = $this->filterRowsByGender($this->getFranchisesForRouteSummary((string)$startDate, (string)$endDate), $genderFilter);
+                    $this->generateSummaryByRouteExcel($rows, (string)$startDate, (string)$endDate);
+                    return;
+
+                case 'activeHolders':
+                    $rows = $this->filterRowsByGender($this->getActiveFranchisesForExport($startDate, $endDate), $genderFilter);
+                    $this->generateFranchiseExcel($rows, $startDate, $endDate, 'active', 'activeHolders');
+                    return;
+
+                case 'expiring':
+                    $rows = $this->filterRowsByGender($this->getExpiringFranchisesForExport($window), $genderFilter);
+                    $this->generateExpiringFranchisesExcel($rows, $window);
+                    return;
+
+                case 'droppedMasterlist':
+                    $rows = $this->filterRowsByGender($this->getDroppedFranchisesForExport($startDate, $endDate), $genderFilter);
+                    $this->generateDroppedMasterlistExcel($rows, $startDate, $endDate);
+                    return;
+
+                case 'perHolderSummary':
+                    $rows = $this->filterRowsByGender($this->getPerHolderSummaryForExport($startDate, $endDate), $genderFilter);
+                    $this->generatePerHolderSummaryExcel($rows, $startDate, $endDate);
+                    return;
+
+                case 'report':
+                default:
+                    $rows = $this->filterRowsByGender($this->getFranchisesForExport((string)$startDate, (string)$endDate, $status), $genderFilter);
+                    $this->generateFranchiseExcel($rows, (string)$startDate, (string)$endDate, $status, 'report');
+                    return;
+            }
+        } catch (Exception $e) {
+            error_log('Excel Export error: ' . $e->getMessage());
+            $this->response(false, 'Failed to export Excel.', ['err' => $e->getMessage()], 500);
+        }
+    }
+
     /**
      * GET: /api/franchises/export/summary-by-route/pdf
      * Backward-compatible route for existing callers.
@@ -1385,6 +1459,7 @@ public function exportFranchiseForm(?string $id = null): void {
             LEFT JOIN makes m ON f.MakeID = m.id
             WHERE LOWER(COALESCE(lh.NewStatus, '')) IN ('new', 'renew')
               AND ah.ExpiryDate IS NOT NULL
+              AND f.Driver IS NOT NULL
               AND ah.ExpiryDate <> '0000-00-00'
         ";
 
@@ -1695,9 +1770,9 @@ public function exportFranchiseForm(?string $id = null): void {
         $name = trim((string)($item['Name'] ?? ''));
         $driver = trim((string)($item['Driver'] ?? ''));
 
-        $html = $this->escapePdfValue($name !== '' ? $name : '-');
-        if ($driver !== '') {
-            $html .= '<br><span style="font-size: 9px;">(Driver: ' . $this->escapePdfValue($driver) . ')</span>';
+        $html = $this->escapePdfValue($driver !== '' ? $driver : '');
+        if ($name !== '') {
+            $html .= '<br><span style="font-size: 9px;">(Operator: ' . $this->escapePdfValue($name) . ')</span>';
         }
 
         return $html;
@@ -2061,7 +2136,7 @@ public function exportFranchiseForm(?string $id = null): void {
 
     private function generateFranchisePDF(array $franchises, ?string $startDate, ?string $endDate, string $statusFilter = 'all', string $reportType = 'report'): void {
         $isActiveReport = ($reportType === 'activeHolders');
-        $title = $isActiveReport ? 'ACTIVE FRANCHISE HOLDERS REPORT' : 'MTOP FRANCHISE REPORT';
+        $title = $isActiveReport ? 'ACTIVE FRANCHISE REPORT' : 'MTOP FRANCHISE REPORT';
         $activeReportStartDate = $isActiveReport
             ? ($startDate ?: date('Y-m-d'))
             : null;
@@ -2083,29 +2158,29 @@ public function exportFranchiseForm(?string $id = null): void {
 
         $pdf = $this->createPdfDocument($title, 'Generated Franchise Report');
 
-        $genderSummary = $this->buildGenderSummaryText($franchises, true, 'Total');
+        // $genderSummary = $this->buildGenderSummaryText($franchises, true, 'Total');
 
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . $this->escapePdfValue($title) . '</p>',
             '<p class="subtitle">' . $this->escapePdfValue($subtitle) . '</p>',
-            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises) . $this->escapePdfValue($genderSummary) . '</p>',
+            '<p class="meta">Status Filter: ' . $this->escapePdfValue($filterLabel) . ' | Date Filter: ' . $this->escapePdfValue($dateFilterLabel) . ' | Total Records: ' . count($franchises) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
-                <th style="width:12%;">OPERATOR</th>
-                <th style="width:4%;">GENDER</th>
+                <th style="width:12%;">DRIVER (OPERATOR)</th>
                 <th style="width:12%;">ADDRESS</th>
                 <th style="width:8%;">FRANCHISE NO.</th>
                 <th style="width:7%;">DATE ISSUED</th>
-                <th style="width:7%;">EXPIRY DATE</th>
                 <th style="width:9%;">ROUTE</th>
                 <th style="width:7%;">MAKE</th>
                 <th style="width:8%;">ENGINE NO.</th>
                 <th style="width:8%;">CHASSIS NO.</th>
                 <th style="width:7%;">PLATE NO.</th>
-                <th style="width:6%;">STATUS</th>
             </tr></thead><tbody>',
         ]);
+                // after operator: <th style="width:4%;">GENDER</th>
+                // after date issued: <th style="width:7%;">EXPIRY DATE</th>
+                // after plate number: <th style="width:6%;">STATUS</th>
 
         if (empty($franchises)) {
             $pdf->WriteHTML('<tr><td colspan="13" style="text-align:center;">No franchise records found for the selected filter.</td></tr>');
@@ -2114,20 +2189,20 @@ public function exportFranchiseForm(?string $id = null): void {
             foreach ($franchises as $index => $item) {
                 $rowHtml[] = '<tr>
                     <td style="text-align:center;">' . ($index + 1) . '</td>
-                    <td>' . ($isActiveReport ? $this->buildOperatorCellHtml($item) : $this->escapePdfValue(strtoupper((string)($item['Name'] ?? '')))) . '</td>
-                    <td style="text-align:center;">' . $this->escapePdfValue($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
+                    <td>' . $this->buildOperatorCellHtml($item) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['Address'] ?? ''))) . '</td>
                     <td style="text-align:center;"><strong>' . $this->escapePdfValue((string)($item['FranchiseNo'] ?? '')) . '</strong></td>
                     <td style="text-align:center;">' . $this->escapePdfValue((string)($item['DateIssued'] ?? '')) . '</td>
-                    <td style="text-align:center;">' . $this->escapePdfValue((string)(($item['ExpiryDate'] ?? '') === '0000-00-00' ? '' : ($item['ExpiryDate'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['Route'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['MakeName'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['EngineNo'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['ChassisNo'] ?? ''))) . '</td>
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['PlateNo'] ?? ''))) . '</td>
-                    <td style="text-align:center;">' . $this->escapePdfValue($this->formatStatusLabel((string)($item['Status'] ?? ''), $item['ExpiryDate'] ?? null, true)) . '</td>
                 </tr>';
             }
+                    // <td style="text-align:center;">' . $this->escapePdfValue($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
+                    // <td style="text-align:center;">' . $this->escapePdfValue((string)(($item['ExpiryDate'] ?? '') === '0000-00-00' ? '' : ($item['ExpiryDate'] ?? ''))) . '</td>
+                    // <td style="text-align:center;">' . $this->escapePdfValue($this->formatStatusLabel((string)($item['Status'] ?? ''), $item['ExpiryDate'] ?? null, true)) . '</td>
 
             $this->writeTableRowsInChunks($pdf, $rowHtml, 100);
         }
@@ -2480,6 +2555,548 @@ public function exportFranchiseForm(?string $id = null): void {
         exit;
     }
 
+
+
+    private function createExcelSpreadsheet(string $title, string $subject): Spreadsheet {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getProperties()
+            ->setCreator('FAST-SB Application')
+            ->setLastModifiedBy('FAST-SB Application')
+            ->setTitle($title)
+            ->setSubject($subject)
+            ->setDescription($subject);
+
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Calibri')->setSize(9);
+        $spreadsheet->getActiveSheet()->setShowGridlines(false);
+
+        return $spreadsheet;
+    }
+
+    private function sanitizeExcelSheetTitle(string $title): string {
+        $sanitized = preg_replace('/[\\\/?*\[\]:]/', ' ', $title) ?: 'Report';
+        $sanitized = trim(preg_replace('/\s+/', ' ', $sanitized) ?: 'Report');
+
+        if ($sanitized === '') {
+            $sanitized = 'Report';
+        }
+
+        return mb_substr($sanitized, 0, 31);
+    }
+
+    private function tryAddExcelLogo(Worksheet $sheet, string $coordinate, string $relativePath, int $height = 55): void {
+        try {
+            $path = $this->resolveAssetPath($relativePath);
+            $drawing = new Drawing();
+            $drawing->setPath($path);
+            $drawing->setCoordinates($coordinate);
+            $drawing->setWorksheet($sheet);
+            $drawing->setHeight($height);
+            $drawing->setOffsetX(5);
+            $drawing->setOffsetY(5);
+        } catch (\Throwable) {
+            // Ignore missing logos for Excel export to avoid blocking the workbook download.
+        }
+    }
+
+    private function applyExcelBrandHeader(Worksheet $sheet, int $lastColumnIndex): int {
+        $lastCol = Coordinate::stringFromColumnIndex($lastColumnIndex);
+        $centerStart = 'A';
+        $centerEndIndex = max(2, $lastColumnIndex);
+        $centerEnd = Coordinate::stringFromColumnIndex($centerEndIndex);
+
+        for ($row = 1; $row <= 4; $row++) {
+            if ($centerStart !== $centerEnd || $centerStart !== 'A') {
+                $sheet->mergeCells("{$centerStart}{$row}:{$centerEnd}{$row}");
+            }
+        }
+
+        $sheet->setCellValue("{$centerStart}1", 'REPUBLIC OF THE PHILIPPINES');
+        $sheet->setCellValue("{$centerStart}2", 'PROVINCE OF DAVAO DEL SUR');
+        $sheet->setCellValue("{$centerStart}3", 'MUNICIPALITY OF SANTA CRUZ');
+
+        $sheet->getStyle("{$centerStart}1:{$centerEnd}3")->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle("{$centerStart}1:{$centerEnd}1")->getFont()->setSize(10);
+        $sheet->getStyle("{$centerStart}2:{$centerEnd}2")->getFont()->setSize(11)->setBold(true);
+        $sheet->getStyle("{$centerStart}3:{$centerEnd}3")->getFont()->setSize(16)->setBold(true);
+
+        $sheet->getRowDimension(1)->setRowHeight(18);
+        $sheet->getRowDimension(2)->setRowHeight(18);
+        $sheet->getRowDimension(3)->setRowHeight(24);
+        $sheet->getRowDimension(4)->setRowHeight(8);
+
+        $this->tryAddExcelLogo($sheet, 'A1', 'storage/images/left.jpg', 60);
+        $this->tryAddExcelLogo($sheet, $lastCol . '1', 'storage/images/right.jpg', 60);
+
+        return 5;
+    }
+
+    private function writeExcelReportHeader(Worksheet $sheet, string $title, string $subtitle, string $meta, int $lastColumnIndex): int {
+        $lastCol = Coordinate::stringFromColumnIndex($lastColumnIndex);
+        $row = $this->applyExcelBrandHeader($sheet, $lastColumnIndex);
+
+        $sheet->mergeCells("A{$row}:{$lastCol}{$row}");
+        $sheet->setCellValue("A{$row}", $title);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->setSize(14);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getRowDimension($row)->setRowHeight(22);
+        $row++;
+
+        $sheet->mergeCells("A{$row}:{$lastCol}{$row}");
+        $sheet->setCellValue("A{$row}", $subtitle);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setItalic(true)->setSize(10);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getRowDimension($row)->setRowHeight(18);
+        $row++;
+
+        $sheet->mergeCells("A{$row}:{$lastCol}{$row}");
+        $sheet->setCellValue("A{$row}", $meta);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setSize(9);
+        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setWrapText(true);
+        $sheet->getRowDimension($row)->setRowHeight(22);
+        $row += 2;
+
+        return $row;
+    }
+
+    private function applyExcelTableHeaderStyle(Worksheet $sheet, string $range): void {
+        $sheet->getStyle($range)->applyFromArray([
+            'font' => [
+                'bold' => true,
+                'size' => 9,
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+                'wrapText' => true,
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'F3F3F3'],
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'D9D9D9'],
+                ],
+            ],
+        ]);
+    }
+
+    private function applyExcelBodyStyle(Worksheet $sheet, string $range): void {
+        $sheet->getStyle($range)->applyFromArray([
+            'alignment' => [
+                'vertical' => Alignment::VERTICAL_TOP,
+                'wrapText' => true,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'D9D9D9'],
+                ],
+            ],
+        ]);
+    }
+
+    private function excelHorizontalAlignment(string $align): string {
+        return match (strtolower($align)) {
+            'center' => Alignment::HORIZONTAL_CENTER,
+            'right' => Alignment::HORIZONTAL_RIGHT,
+            default => Alignment::HORIZONTAL_LEFT,
+        };
+    }
+
+    private function writeExcelTable(Worksheet $sheet, int $startRow, array $columns, array $rows, string $emptyMessage = 'No records found for the selected filter.'): int {
+        $columnCount = count($columns);
+        $lastCol = Coordinate::stringFromColumnIndex($columnCount);
+
+        foreach ($columns as $index => $column) {
+            $columnLetter = Coordinate::stringFromColumnIndex($index + 1);
+            $sheet->setCellValue("{$columnLetter}{$startRow}", (string)($column['label'] ?? ''));
+            $sheet->getColumnDimension($columnLetter)->setWidth((float)($column['width'] ?? 12));
+        }
+
+        $this->applyExcelTableHeaderStyle($sheet, "A{$startRow}:{$lastCol}{$startRow}");
+        $sheet->getRowDimension($startRow)->setRowHeight(24);
+
+        $currentRow = $startRow + 1;
+
+        if (empty($rows)) {
+            $sheet->mergeCells("A{$currentRow}:{$lastCol}{$currentRow}");
+            $sheet->setCellValue("A{$currentRow}", $emptyMessage);
+            $sheet->getStyle("A{$currentRow}:{$lastCol}{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $this->applyExcelBodyStyle($sheet, "A{$currentRow}:{$lastCol}{$currentRow}");
+            $sheet->getRowDimension($currentRow)->setRowHeight(22);
+            return $currentRow;
+        }
+
+        foreach ($rows as $rowIndex => $row) {
+            foreach ($columns as $index => $column) {
+                $columnLetter = Coordinate::stringFromColumnIndex($index + 1);
+                $cell = "{$columnLetter}{$currentRow}";
+                $valueResolver = $column['value'] ?? null;
+                $value = is_callable($valueResolver)
+                    ? $valueResolver($row, $rowIndex)
+                    : ($row[(string)($column['key'] ?? '')] ?? '');
+
+                if (($column['type'] ?? 'string') === 'numeric' && $value !== '' && $value !== null) {
+                    $sheet->setCellValue($cell, (float)$value);
+                } else {
+                    $sheet->setCellValue($cell, (string)($value ?? ''));
+                }
+
+                $sheet->getStyle($cell)->getAlignment()->setHorizontal(
+                    $this->excelHorizontalAlignment((string)($column['align'] ?? 'left'))
+                );
+
+                if (!empty($column['format'])) {
+                    $sheet->getStyle($cell)->getNumberFormat()->setFormatCode((string)$column['format']);
+                }
+            }
+
+            $sheet->getRowDimension($currentRow)->setRowHeight(24);
+            $currentRow++;
+        }
+
+        $endRow = $currentRow - 1;
+        $this->applyExcelBodyStyle($sheet, "A" . ($startRow + 1) . ":{$lastCol}{$endRow}");
+
+        return $endRow;
+    }
+
+    private function finalizeExcelWorksheet(Worksheet $sheet, int $lastColumnIndex, int $lastRow, int $repeatHeaderEndRow, string $orientation = PageSetup::ORIENTATION_LANDSCAPE, ?string $freezePane = null): void {
+        $lastCol = Coordinate::stringFromColumnIndex($lastColumnIndex);
+        $pageSetup = $sheet->getPageSetup();
+        $pageSetup->setOrientation($orientation);
+        $pageSetup->setPaperSize(PageSetup::PAPERSIZE_LEGAL);
+        $pageSetup->setFitToPage(true);
+        $pageSetup->setFitToWidth(1);
+        $pageSetup->setFitToHeight(0);
+        $pageSetup->setRowsToRepeatAtTopByStartAndEnd(1, $repeatHeaderEndRow);
+        $pageSetup->setPrintArea("A1:{$lastCol}{$lastRow}");
+
+        $sheet->getPageMargins()
+            ->setTop(0.35)
+            ->setBottom(0.35)
+            ->setLeft(0.20)
+            ->setRight(0.20)
+            ->setHeader(0.15)
+            ->setFooter(0.15);
+
+        $sheet->getHeaderFooter()->setOddFooter('&RPage &P of &N');
+        $sheet->getPageSetup()->setHorizontalCentered(true);
+
+        if ($freezePane) {
+            $sheet->freezePane($freezePane);
+        }
+    }
+
+    private function streamExcelOutput(Spreadsheet $spreadsheet, string $fileName): void {
+        if (function_exists('ob_get_level')) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Cache-Control: max-age=0, private, must-revalidate');
+        header('Pragma: public');
+
+        $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
+        $writer->save('php://output');
+        $spreadsheet->disconnectWorksheets();
+        exit;
+    }
+
+    private function buildOperatorCellText(array $item): string {
+        $driver = strtoupper(trim((string)($item['Driver'] ?? '')));
+        $name = strtoupper(trim((string)($item['Name'] ?? '')));
+
+        if ($driver !== '' && $name !== '') {
+            return $driver . "
+(Operator: {$name})";
+        }
+
+        return $driver !== '' ? $driver : $name;
+    }
+
+    private function generateFranchiseExcel(array $franchises, ?string $startDate, ?string $endDate, string $statusFilter = 'all', string $reportType = 'report'): void {
+        $isActiveReport = ($reportType === 'activeHolders');
+        $title = $isActiveReport ? 'ACTIVE FRANCHISE REPORT' : 'MTOP FRANCHISE REPORT';
+        $activeReportStartDate = $isActiveReport ? ($startDate ?: date('Y-m-d')) : null;
+        $dateFilterLabel = $isActiveReport
+            ? $this->buildOptionalDateRangeLabel($activeReportStartDate, $endDate, 'From ' . date('F j, Y'))
+            : $this->buildDateRangeLabel((string)$startDate, (string)$endDate);
+        $subtitle = $isActiveReport
+            ? 'Franchise records filtered using franchise expiry date'
+            : $dateFilterLabel;
+        $filterLabel = $isActiveReport
+            ? 'ACTIVE / EXPIRY DATE FILTER'
+            : match ($statusFilter) {
+                'drop' => 'DROPPED',
+                'renew' => 'RENEW',
+                'new' => 'NEW',
+                'expired' => 'EXPIRED',
+                default => 'ALL',
+            };
+
+        $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Franchise Report');
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle($this->sanitizeExcelSheetTitle($title));
+
+        $columns = [
+            ['label' => '#', 'width' => 5, 'align' => 'center', 'value' => static fn (array $row, int $index): int => $index + 1],
+            ['label' => 'DRIVER (OPERATOR)', 'width' => 24, 'value' => fn (array $row): string => $this->buildOperatorCellText($row)],
+            ['label' => 'ADDRESS', 'width' => 24, 'value' => static fn (array $row): string => strtoupper((string)($row['Address'] ?? ''))],
+            ['label' => 'FRANCHISE NO.', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['FranchiseNo'] ?? '')],
+            ['label' => 'DATE ISSUED', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['DateIssued'] ?? '')],
+            ['label' => 'ROUTE', 'width' => 18, 'value' => static fn (array $row): string => strtoupper((string)($row['Route'] ?? ''))],
+            ['label' => 'MAKE', 'width' => 12, 'value' => static fn (array $row): string => strtoupper((string)($row['MakeName'] ?? ''))],
+            ['label' => 'ENGINE NO.', 'width' => 16, 'value' => static fn (array $row): string => strtoupper((string)($row['EngineNo'] ?? ''))],
+            ['label' => 'CHASSIS NO.', 'width' => 16, 'value' => static fn (array $row): string => strtoupper((string)($row['ChassisNo'] ?? ''))],
+            ['label' => 'PLATE NO.', 'width' => 14, 'value' => static fn (array $row): string => strtoupper((string)($row['PlateNo'] ?? ''))],
+        ];
+
+        $meta = 'Status Filter: ' . $filterLabel . ' | Date Filter: ' . $dateFilterLabel . ' | Total Records: ' . count($franchises);
+        $tableStartRow = $this->writeExcelReportHeader($sheet, $title, $subtitle, $meta, count($columns));
+        $lastRow = $this->writeExcelTable($sheet, $tableStartRow, $columns, $franchises, 'No franchise records found for the selected filter.');
+        $this->finalizeExcelWorksheet($sheet, count($columns), $lastRow, $tableStartRow, PageSetup::ORIENTATION_LANDSCAPE, 'A' . ($tableStartRow + 1));
+
+        $filePrefix = $isActiveReport ? 'Active_Franchise_Holders_Report_' : 'Franchise_Report_';
+        $fileName = $filePrefix . date('Y-m-d-H-i-s') . '.xlsx';
+        $this->streamExcelOutput($spreadsheet, $fileName);
+    }
+
+    private function generateExpiringFranchisesExcel(array $rows, int $window): void {
+        $title = 'FRANCHISES EXPIRING WITHIN ' . $window . ' DAYS';
+        $subtitle = 'Current active franchise units expiring between ' . date('F j, Y') . ' and ' . date('F j, Y', strtotime('+' . $window . ' days'));
+        $meta = 'Total Records: ' . count($rows) . $this->buildGenderSummaryText($rows, true, 'Total');
+
+        $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Expiring Franchises Report');
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle($this->sanitizeExcelSheetTitle('Expiring ' . $window . ' Days'));
+
+        $columns = [
+            ['label' => '#', 'width' => 5, 'align' => 'center', 'value' => static fn (array $row, int $index): int => $index + 1],
+            ['label' => 'OPERATOR', 'width' => 22, 'value' => static fn (array $row): string => strtoupper((string)($row['Name'] ?? ''))],
+            ['label' => 'GENDER', 'width' => 9, 'align' => 'center', 'value' => fn (array $row): string => $this->normalizeGenderLabel($row['Gender'] ?? null)],
+            ['label' => 'ADDRESS', 'width' => 24, 'value' => static fn (array $row): string => strtoupper((string)($row['Address'] ?? ''))],
+            ['label' => 'FRANCHISE NO.', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['FranchiseNo'] ?? '')],
+            ['label' => 'EXPIRY DATE', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['ExpiryDate'] ?? '')],
+            ['label' => 'DAYS LEFT', 'width' => 10, 'align' => 'center', 'type' => 'numeric', 'value' => static fn (array $row): int => (int)($row['DaysRemaining'] ?? 0)],
+            ['label' => 'ROUTE', 'width' => 18, 'value' => static fn (array $row): string => strtoupper((string)($row['Route'] ?? ''))],
+            ['label' => 'MAKE', 'width' => 12, 'value' => static fn (array $row): string => strtoupper((string)($row['MakeName'] ?? ''))],
+            ['label' => 'PLATE NO.', 'width' => 14, 'value' => static fn (array $row): string => strtoupper((string)($row['PlateNo'] ?? ''))],
+            ['label' => 'STATUS', 'width' => 12, 'align' => 'center', 'value' => fn (array $row): string => $this->formatStatusLabel((string)($row['Status'] ?? ''), $row['ExpiryDate'] ?? null, false)],
+        ];
+
+        $tableStartRow = $this->writeExcelReportHeader($sheet, $title, $subtitle, $meta, count($columns));
+        $lastRow = $this->writeExcelTable($sheet, $tableStartRow, $columns, $rows, 'No expiring franchises found within the selected window.');
+        $this->finalizeExcelWorksheet($sheet, count($columns), $lastRow, $tableStartRow, PageSetup::ORIENTATION_LANDSCAPE, 'A' . ($tableStartRow + 1));
+
+        $fileName = 'Franchises_Expiring_Within_' . $window . '_Days_' . date('Y-m-d-H-i-s') . '.xlsx';
+        $this->streamExcelOutput($spreadsheet, $fileName);
+    }
+
+    private function generateDroppedMasterlistExcel(array $rows, ?string $startDate = null, ?string $endDate = null): void {
+        $title = 'DROPPED FRANCHISE MASTERLIST';
+        $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
+        $meta = 'Total Records: ' . count($rows) . $this->buildGenderSummaryText($rows, true, 'Total');
+
+        $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Dropped Franchises Report');
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle($this->sanitizeExcelSheetTitle($title));
+
+        $columns = [
+            ['label' => '#', 'width' => 5, 'align' => 'center', 'value' => static fn (array $row, int $index): int => $index + 1],
+            ['label' => 'OPERATOR', 'width' => 22, 'value' => static fn (array $row): string => strtoupper((string)($row['Name'] ?? ''))],
+            ['label' => 'GENDER', 'width' => 9, 'align' => 'center', 'value' => fn (array $row): string => $this->normalizeGenderLabel($row['Gender'] ?? null)],
+            ['label' => 'ADDRESS', 'width' => 22, 'value' => static fn (array $row): string => strtoupper((string)($row['Address'] ?? ''))],
+            ['label' => 'FRANCHISE NO.', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['FranchiseNo'] ?? '')],
+            ['label' => 'ROUTE', 'width' => 18, 'value' => static fn (array $row): string => strtoupper((string)($row['Route'] ?? ''))],
+            ['label' => 'MAKE', 'width' => 12, 'value' => static fn (array $row): string => strtoupper((string)($row['MakeName'] ?? ''))],
+            ['label' => 'PLATE NO.', 'width' => 14, 'value' => static fn (array $row): string => strtoupper((string)($row['PlateNo'] ?? ''))],
+            ['label' => 'DATE ISSUED', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['DateIssued'] ?? '')],
+            ['label' => 'LAST EXPIRY', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (($row['ExpiryDate'] ?? '') === '0000-00-00' ? '' : (string)($row['ExpiryDate'] ?? ''))],
+            ['label' => 'DATE DROPPED', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => substr((string)($row['DroppedAt'] ?? ''), 0, 10)],
+            ['label' => 'DROP REASON', 'width' => 32, 'value' => static fn (array $row): string => strtoupper((string)($row['DropReason'] ?? ''))],
+        ];
+
+        $tableStartRow = $this->writeExcelReportHeader($sheet, $title, $subtitle, $meta, count($columns));
+        $lastRow = $this->writeExcelTable($sheet, $tableStartRow, $columns, $rows, 'No dropped franchise records found for the selected filter.');
+        $this->finalizeExcelWorksheet($sheet, count($columns), $lastRow, $tableStartRow, PageSetup::ORIENTATION_LANDSCAPE, 'A' . ($tableStartRow + 1));
+
+        $fileName = 'Dropped_Franchise_Masterlist_' . date('Y-m-d-H-i-s') . '.xlsx';
+        $this->streamExcelOutput($spreadsheet, $fileName);
+    }
+
+    private function generatePerHolderSummaryExcel(array $rows, ?string $startDate = null, ?string $endDate = null): void {
+        $totalActiveUnits = array_sum(array_map(static fn (array $row): int => (int)($row['ActiveUnitCount'] ?? 0), $rows));
+        $title = 'PER HOLDER SUMMARY OF ACTIVE FRANCHISES (TOTAL FRANCHISES: ' . $totalActiveUnits . ')';
+        $subtitle = 'Date Filter: ' . $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All') . $this->buildGenderSummaryText($rows, true, 'Total');
+
+        $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Per Holder Franchise Summary');
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle($this->sanitizeExcelSheetTitle('Per Holder Summary'));
+
+        $columns = [
+            ['label' => '#', 'width' => 5, 'align' => 'center', 'value' => static fn (array $row, int $index): int => $index + 1],
+            ['label' => 'OPERATOR', 'width' => 24, 'value' => static fn (array $row): string => strtoupper((string)($row['Name'] ?? ''))],
+            ['label' => 'GENDER', 'width' => 9, 'align' => 'center', 'value' => fn (array $row): string => $this->normalizeGenderLabel($row['Gender'] ?? null)],
+            ['label' => 'ADDRESS', 'width' => 24, 'value' => static fn (array $row): string => strtoupper((string)($row['Address'] ?? ''))],
+            ['label' => 'CONTACT NO.', 'width' => 16, 'value' => static fn (array $row): string => (string)($row['ContactNo'] ?? '')],
+            ['label' => 'ACTIVE UNITS', 'width' => 11, 'align' => 'center', 'type' => 'numeric', 'value' => static fn (array $row): int => (int)($row['ActiveUnitCount'] ?? 0)],
+            ['label' => 'FRANCHISE NOS.', 'width' => 24, 'value' => static fn (array $row): string => (string)($row['FranchiseNos'] ?? '')],
+            ['label' => 'PLATE NOS.', 'width' => 18, 'value' => static fn (array $row): string => (string)($row['PlateNos'] ?? '')],
+            ['label' => 'ROUTES', 'width' => 24, 'value' => static fn (array $row): string => strtoupper((string)($row['Routes'] ?? ''))],
+            ['label' => 'NEAREST EXPIRY', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (($row['NearestExpiryDate'] ?? '') === '0000-00-00' ? '' : (string)($row['NearestExpiryDate'] ?? ''))],
+        ];
+
+        $tableStartRow = $this->writeExcelReportHeader($sheet, $title, '', $subtitle, count($columns));
+        $lastRow = $this->writeExcelTable($sheet, $tableStartRow, $columns, $rows, 'No active franchise holders found for the selected filter.');
+        $this->finalizeExcelWorksheet($sheet, count($columns), $lastRow, $tableStartRow, PageSetup::ORIENTATION_LANDSCAPE, 'A' . ($tableStartRow + 1));
+
+        $fileName = 'Per_Holder_Summary_Active_Franchises_' . date('Y-m-d-H-i-s') . '.xlsx';
+        $this->streamExcelOutput($spreadsheet, $fileName);
+    }
+
+    private function generateSummaryByRouteExcel(array $rows, string $startDate, string $endDate): void {
+        $title = 'SUMMARY OF FRANCHISES BY ROUTE';
+        $subtitle = $this->buildDateRangeLabel($startDate, $endDate);
+        $meta = trim($this->buildGenderSummaryText($rows, true, 'Total'), ' |');
+
+        $summary = [];
+        $grand = ['new' => 0, 'renew' => 0, 'total' => 0];
+
+        foreach ($rows as $r) {
+            $route = strtoupper(trim((string)($r['Route'] ?? 'UNKNOWN')));
+            $status = strtolower(trim((string)($r['Status'] ?? '')));
+
+            if (!isset($summary[$route])) {
+                $summary[$route] = ['new' => 0, 'renew' => 0, 'total' => 0];
+            }
+
+            $summary[$route]['total']++;
+            $grand['total']++;
+
+            if ($status === 'new') {
+                $summary[$route]['new']++;
+                $grand['new']++;
+            } elseif ($status === 'renew') {
+                $summary[$route]['renew']++;
+                $grand['renew']++;
+            }
+        }
+
+        ksort($summary);
+
+        $spreadsheet = $this->createExcelSpreadsheet($title, 'Generated Summary By Route');
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle($this->sanitizeExcelSheetTitle($title));
+
+        $detailColumns = [
+            ['label' => '#', 'width' => 5, 'align' => 'center', 'value' => static fn (array $row, int $index): int => $index + 1],
+            ['label' => 'OPERATOR', 'width' => 20, 'value' => static fn (array $row): string => strtoupper((string)($row['Name'] ?? ''))],
+            ['label' => 'GENDER', 'width' => 9, 'align' => 'center', 'value' => fn (array $row): string => $this->normalizeGenderLabel($row['Gender'] ?? null)],
+            ['label' => 'ADDRESS', 'width' => 22, 'value' => static fn (array $row): string => strtoupper((string)($row['Address'] ?? ''))],
+            ['label' => 'FRANCHISE NO.', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['FranchiseNo'] ?? '')],
+            ['label' => 'DATE ISSUED', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (string)($row['DateIssued'] ?? '')],
+            ['label' => 'EXPIRY', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => (($row['ExpiryDate'] ?? '') === '0000-00-00' ? '' : (string)($row['ExpiryDate'] ?? ''))],
+            ['label' => 'PLATE', 'width' => 12, 'align' => 'center', 'value' => static fn (array $row): string => strtoupper((string)($row['PlateNo'] ?? ''))],
+            ['label' => 'MAKE', 'width' => 12, 'value' => static fn (array $row): string => strtoupper((string)($row['MakeName'] ?? ''))],
+            ['label' => 'ENGINE NO.', 'width' => 16, 'value' => static fn (array $row): string => strtoupper((string)($row['EngineNo'] ?? ''))],
+            ['label' => 'CHASSIS NO.', 'width' => 16, 'value' => static fn (array $row): string => strtoupper((string)($row['ChassisNo'] ?? ''))],
+            ['label' => 'OR NO.', 'width' => 14, 'align' => 'center', 'value' => static fn (array $row): string => strtoupper((string)($row['ORNo'] ?? ''))],
+            ['label' => 'AMOUNT', 'width' => 12, 'align' => 'right', 'type' => 'numeric', 'format' => '#,##0.00', 'value' => static fn (array $row): float => (float)($row['Amount'] ?? 0)],
+            ['label' => 'STATUS', 'width' => 10, 'align' => 'center', 'value' => static fn (array $row): string => strtoupper((string)($row['Status'] ?? ''))],
+        ];
+
+        $tableStartRow = $this->writeExcelReportHeader($sheet, $title, $subtitle, $meta, count($detailColumns));
+
+        $currentRow = $tableStartRow;
+        $sheet->mergeCells('A' . $currentRow . ':D' . $currentRow);
+        $sheet->setCellValue('A' . $currentRow, 'OVERALL SUMMARY');
+        $sheet->getStyle('A' . $currentRow . ':D' . $currentRow)->getFont()->setBold(true)->setSize(10);
+        $currentRow++;
+
+        $overallColumns = [
+            ['label' => 'ROUTE', 'width' => 24, 'value' => static fn (array $row): string => (string)($row['route'] ?? '')],
+            ['label' => 'NEW', 'width' => 10, 'align' => 'center', 'type' => 'numeric', 'value' => static fn (array $row): int => (int)($row['new'] ?? 0)],
+            ['label' => 'RENEW', 'width' => 10, 'align' => 'center', 'type' => 'numeric', 'value' => static fn (array $row): int => (int)($row['renew'] ?? 0)],
+            ['label' => 'TOTAL', 'width' => 10, 'align' => 'center', 'type' => 'numeric', 'value' => static fn (array $row): int => (int)($row['total'] ?? 0)],
+        ];
+
+        $overallRows = [];
+        foreach ($summary as $routeName => $counts) {
+            $overallRows[] = [
+                'route' => $routeName,
+                'new' => $counts['new'],
+                'renew' => $counts['renew'],
+                'total' => $counts['total'],
+            ];
+        }
+        $overallRows[] = [
+            'route' => 'GRAND TOTAL',
+            'new' => $grand['new'],
+            'renew' => $grand['renew'],
+            'total' => $grand['total'],
+        ];
+
+        $currentRow = $this->writeExcelTable($sheet, $currentRow, $overallColumns, $overallRows, 'No route summary available.');
+        $sheet->getStyle('A' . $currentRow . ':D' . $currentRow)->getFont()->setBold(true);
+        $currentRow += 2;
+
+        $groupedRows = [];
+        foreach ($rows as $row) {
+            $route = strtoupper(trim((string)($row['Route'] ?? 'UNKNOWN')));
+            $groupedRows[$route][] = $row;
+        }
+        ksort($groupedRows);
+
+        foreach ($groupedRows as $routeName => $routeRows) {
+            $routeTotals = ['total' => 0, 'new' => 0, 'renew' => 0];
+            $lastDetailCol = Coordinate::stringFromColumnIndex(count($detailColumns));
+
+            $sheet->mergeCells('A' . $currentRow . ':' . $lastDetailCol . $currentRow);
+            $sheet->setCellValue('A' . $currentRow, 'ROUTE: ' . $routeName);
+            $sheet->getStyle('A' . $currentRow . ':' . $lastDetailCol . $currentRow)->applyFromArray([
+                'font' => ['bold' => true, 'size' => 10],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'FAFAFA'],
+                ],
+            ]);
+            $currentRow++;
+
+            foreach ($routeRows as $routeRow) {
+                $status = strtolower((string)($routeRow['Status'] ?? ''));
+                $routeTotals['total']++;
+                if ($status === 'new') {
+                    $routeTotals['new']++;
+                } elseif ($status === 'renew') {
+                    $routeTotals['renew']++;
+                }
+            }
+
+            $currentRow = $this->writeExcelTable($sheet, $currentRow, $detailColumns, $routeRows, 'No records under this route.');
+            $currentRow++;
+            $sheet->mergeCells('A' . $currentRow . ':' . $lastDetailCol . $currentRow);
+            $sheet->setCellValue('A' . $currentRow, 'Route Franchise totals: Total: ' . $routeTotals['total'] . ', New: ' . $routeTotals['new'] . ', Renew: ' . $routeTotals['renew']);
+            $sheet->getStyle('A' . $currentRow . ':' . $lastDetailCol . $currentRow)->getFont()->setBold(true);
+            $currentRow += 2;
+        }
+
+        $lastRow = max($currentRow - 1, $tableStartRow);
+        $this->finalizeExcelWorksheet($sheet, count($detailColumns), $lastRow, $tableStartRow, PageSetup::ORIENTATION_LANDSCAPE, 'A' . ($tableStartRow + 1));
+
+        $fileName = 'Franchise_Summary_By_Route_' . date('Y-m-d-H-i-s') . '.xlsx';
+        $this->streamExcelOutput($spreadsheet, $fileName);
+    }
 
     /**
      * Retrieves a single franchise record with associated applicant, make, and user names.

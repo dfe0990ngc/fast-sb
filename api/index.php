@@ -81,6 +81,7 @@ $router->get('/api/franchises/statistics/{year}', [FranchiseController::class, '
 $router->get('/api/franchises/export/pdf', [FranchiseController::class, 'exportPDF'], [AuthMiddleware::class]);
 $router->get('/api/franchises/export/summary-by-route/pdf', [FranchiseController::class, 'exportSummaryByRoutePDF'], [AuthMiddleware::class]);
 $router->get('/api/franchises/{id}/export-form', [FranchiseController::class, 'exportFranchiseForm'], [AuthMiddleware::class]);
+$router->get('/api/franchises/export/excel', [FranchiseController::class, 'exportExcel'], [AuthMiddleware::class]);
 
 // Applicant Routes (require authentication)
 $router->get('/api/applicants', [ApplicantController::class, 'index'], [AuthMiddleware::class]);

@@ -40,6 +40,7 @@ type ExportPdfType =
   | 'expiring90';
 
 type ExportPdfAction = 'download' | 'open' | 'print';
+type ExportFileFormat = 'pdf' | 'excel';
 
 type ExportPdfStatus = 'all' | 'new' | 'renew' | 'drop' | 'active';
 type ExportPdfGender = 'all' | 'M' | 'F';
@@ -47,6 +48,7 @@ type ExportPdfGender = 'all' | 'M' | 'F';
 type ExportPdfOptions = {
   type?: ExportPdfType;
   action?: ExportPdfAction;
+  format?: ExportFileFormat;
   status?: ExportPdfStatus;
   gender?: ExportPdfGender;
 };
@@ -233,6 +235,100 @@ function getPdfExportConfig(
           gender_filter: genderParam,
         }),
         filename: `Franchise_Report_${today}.pdf`,
+      };
+  }
+}
+
+function getExcelExportConfig(
+  type: ExportPdfType,
+  start: string | null,
+  end: string | null,
+  status: ExportPdfStatus,
+  gender: ExportPdfGender
+) {
+  const today = getTodayForFilename();
+  const genderParam = gender === 'all' ? 'all' : gender;
+
+  switch (type) {
+    case 'summaryByRoute':
+      return {
+        endpoint: appendQueryParams('/api/franchises/export/excel', {
+          report_type: 'summaryByRoute',
+          start_date: start ?? '',
+          end_date: end ?? '',
+          gender_filter: genderParam,
+        }),
+        filename: `Franchise_Summary_By_Route_${today}.xlsx`,
+      };
+
+    case 'activeHolders':
+      return {
+        endpoint: appendOptionalDateParams('/api/franchises/export/excel', start, end, {
+          report_type: 'activeHolders',
+          gender_filter: genderParam,
+        }),
+        filename: `Active_Franchise_Holders_${today}.xlsx`,
+      };
+
+    case 'droppedMasterlist':
+      return {
+        endpoint: appendOptionalDateParams('/api/franchises/export/excel', start, end, {
+          report_type: 'droppedMasterlist',
+          gender_filter: genderParam,
+        }),
+        filename: `Dropped_Franchise_Masterlist_${today}.xlsx`,
+      };
+
+    case 'perHolderSummary':
+      return {
+        endpoint: appendOptionalDateParams('/api/franchises/export/excel', start, end, {
+          report_type: 'perHolderSummary',
+          gender_filter: genderParam,
+        }),
+        filename: `Per_Holder_Summary_${today}.xlsx`,
+      };
+
+    case 'expiring30':
+      return {
+        endpoint: appendQueryParams('/api/franchises/export/excel', {
+          report_type: 'expiring',
+          window: '30',
+          gender_filter: genderParam,
+        }),
+        filename: `Franchises_Expiring_Within_30_Days_${today}.xlsx`,
+      };
+
+    case 'expiring60':
+      return {
+        endpoint: appendQueryParams('/api/franchises/export/excel', {
+          report_type: 'expiring',
+          window: '60',
+          gender_filter: genderParam,
+        }),
+        filename: `Franchises_Expiring_Within_60_Days_${today}.xlsx`,
+      };
+
+    case 'expiring90':
+      return {
+        endpoint: appendQueryParams('/api/franchises/export/excel', {
+          report_type: 'expiring',
+          window: '90',
+          gender_filter: genderParam,
+        }),
+        filename: `Franchises_Expiring_Within_90_Days_${today}.xlsx`,
+      };
+
+    case 'report':
+    default:
+      return {
+        endpoint: appendQueryParams('/api/franchises/export/excel', {
+          report_type: 'report',
+          start_date: start ?? '',
+          end_date: end ?? '',
+          status,
+          gender_filter: genderParam,
+        }),
+        filename: `Franchise_Report_${today}.xlsx`,
       };
   }
 }
@@ -494,12 +590,29 @@ export default function FranchiseManagement() {
 
     const type = options?.type ?? exportDefaultType ?? 'report';
     const action = options?.action ?? 'download';
+    const format = options?.format ?? 'pdf';
     const status = options?.status ?? 'all';
     const gender = options?.gender ?? 'all';
 
     try {
       const start = startDate ? formatDateForApi(startDate) : null;
       const end = endDate ? formatDateForApi(endDate) : null;
+
+      if (format === 'excel') {
+        const { endpoint, filename } = getExcelExportConfig(type, start, end, status, gender);
+        const { data } = await api.get(endpoint, { responseType: 'blob' });
+        const blob = new Blob([
+          data,
+        ], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+
+        const blobUrl = URL.createObjectURL(blob);
+        downloadBlobUrl(blobUrl, filename);
+        toast.success('Excel downloaded successfully!');
+        setIsExportDialogOpen(false);
+        return;
+      }
 
       const { endpoint, filename } = getPdfExportConfig(type, start, end, status, gender);
 

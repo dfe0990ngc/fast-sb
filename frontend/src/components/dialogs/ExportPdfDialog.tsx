@@ -33,12 +33,14 @@ type ExportTypeOption =
 
 export type ExportPdfStatus = 'all' | 'new' | 'renew' | 'drop' | 'active';
 export type ExportPdfAction = 'download' | 'open' | 'print';
+export type ExportFileFormat = 'pdf' | 'excel';
 export type ExportPdfGender = 'all' | 'M' | 'F';
 export type ExpiringWindow = 30 | 60 | 90;
 
 export type ExportPdfOptions = {
   type: ExportPdfType;
   action: ExportPdfAction;
+  format?: ExportFileFormat;
   status?: ExportPdfStatus;
   gender?: ExportPdfGender;
 };
@@ -292,7 +294,7 @@ export default function ExportPdfDialog({
     supportsOptionalDateFilter,
   ]);
 
-  const doExport = async (action: ExportPdfAction) => {
+  const doExport = async (action: ExportPdfAction, format: ExportFileFormat = 'pdf') => {
     if (requiresDateRange && (!formData.startDate || !formData.endDate)) {
       toast.error('Please select both a start date and an end date.');
       return;
@@ -328,6 +330,7 @@ export default function ExportPdfDialog({
     await onExport(startDateObj, endDateObj, {
       type: resolvedType,
       action,
+      format,
       status: isStatusVisible ? statusFilter : undefined,
       gender: genderFilter,
     });
@@ -340,18 +343,18 @@ export default function ExportPdfDialog({
         if (!nextOpen) onClose();
       }}
     >
-      <DialogContent className="overflow-hidden p-0 sm:max-w-lg">
-        <DialogHeader className="border-b bg-slate-50 px-5 py-4">
+      <DialogContent className="p-0 sm:max-w-xl overflow-hidden">
+        <DialogHeader className="bg-slate-50 px-5 py-4 border-b">
           <DialogTitle className="text-base sm:text-lg">{title}</DialogTitle>
           <DialogDescription className="text-sm leading-relaxed">
-            {description}
+            {description} Choose PDF or Excel below.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 px-5 py-4">
           <Field label="Export Type">
             <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
+              className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
               value={exportType}
               onChange={(e) => {
                 const nextType = e.target.value as ExportTypeOption;
@@ -368,7 +371,7 @@ export default function ExportPdfDialog({
             >
               <option value="report">Franchise Report</option>
               <option value="summaryByRoute">Summary By Route</option>
-              <option value="activeHolders">Active Franchise Holders</option>
+              <option value="activeHolders">Active Units</option>
               <option value="expiring">Expiring Within 30/60/90 Days</option>
               <option value="droppedMasterlist">Dropped Franchise Masterlist</option>
               <option value="perHolderSummary">Per Holder Summary</option>
@@ -377,7 +380,7 @@ export default function ExportPdfDialog({
 
           <Field label="Gender">
             <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
+              className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
               value={genderFilter}
               onChange={(e) => setGenderFilter(e.target.value as ExportPdfGender)}
               disabled={isExporting}
@@ -391,7 +394,7 @@ export default function ExportPdfDialog({
           {isStatusVisible ? (
             <Field label="Status">
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
+                className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as ExportPdfStatus)}
                 disabled={isExporting}
@@ -408,7 +411,7 @@ export default function ExportPdfDialog({
           {isExpiringType ? (
             <Field label="Expiring Window">
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008ea2]/20"
+                className="bg-white px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-[#008ea2]/20 focus:ring-2 w-full text-sm"
                 value={expiringWindow}
                 onChange={(e) => setExpiringWindow(Number(e.target.value) as ExpiringWindow)}
                 disabled={isExporting}
@@ -421,17 +424,17 @@ export default function ExportPdfDialog({
           ) : null}
 
           {(requiresDateRange || supportsOptionalDateFilter) ? (
-            <div className="space-y-3 rounded-lg border bg-slate-50 px-4 py-3">
+            <div className="space-y-3 bg-slate-50 px-4 py-3 border rounded-lg">
               <div>
-                <p className="text-sm font-medium text-slate-700">Date Filter</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+                <p className="font-medium text-slate-700 text-sm">Date Filter</p>
+                <p className="mt-0.5 text-slate-500 text-xs leading-relaxed">
                   {requiresDateRange
                     ? 'Both start date and end date are required.'
                     : 'Leave both dates blank for All. Enter only start date to filter from that date onward.'}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="gap-3 grid grid-cols-1 sm:grid-cols-2">
                 <Field label="Start Date">
                   <Input
                     id="start-date"
@@ -455,13 +458,13 @@ export default function ExportPdfDialog({
             </div>
           ) : null}
 
-          <div className="rounded-lg border bg-white px-4 py-3">
-            <p className="text-sm font-medium text-slate-700">Current Selection</p>
-            <p className="mt-1 text-sm leading-relaxed text-slate-500">{selectionText}</p>
+          <div className="bg-white px-4 py-3 border rounded-lg">
+            <p className="font-medium text-slate-700 text-sm">Current Selection</p>
+            <p className="mt-1 text-slate-500 text-sm leading-relaxed">{selectionText}</p>
           </div>
         </div>
 
-        <DialogFooter className="flex flex-col gap-2 border-t bg-white px-5 py-4 sm:flex-row">
+        <DialogFooter className="flex sm:flex-row flex-col gap-2 bg-white px-5 py-4 border-t">
           <Button variant="outline" onClick={onClose} disabled={isExporting}>
             Cancel
           </Button>
@@ -472,7 +475,7 @@ export default function ExportPdfDialog({
             disabled={isExporting}
             className="w-full sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
             Open
           </Button>
 
@@ -482,16 +485,26 @@ export default function ExportPdfDialog({
             disabled={isExporting}
             className="w-full sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
             Print
           </Button>
 
           <Button
-            onClick={() => void doExport('download')}
+            variant="outline"
+            onClick={() => void doExport('download', 'excel')}
             disabled={isExporting}
-            className="w-full bg-[#008ea2] hover:bg-[#007a8b] sm:w-auto"
+            className="w-full sm:w-auto"
           >
-            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
+            Download Excel
+          </Button>
+
+          <Button
+            onClick={() => void doExport('download', 'pdf')}
+            disabled={isExporting}
+            className="bg-[#008ea2] hover:bg-[#007a8b] w-full sm:w-auto"
+          >
+            {isExporting ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : null}
             Download PDF
           </Button>
         </DialogFooter>
