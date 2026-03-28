@@ -116,6 +116,7 @@ $router->put('/api/my-profile', [UserController::class, 'updateProfile'], [AuthM
 
 // Settings routes (require authentication)
 $router->get('/api/settings/export-backup', [SettingsController::class, 'exportBackup'], [AuthMiddleware::class]);
+$router->post('/api/settings/restore-backup', [SettingsController::class, 'restoreBackup'], [AuthMiddleware::class]);
 $router->post('/api/settings/clear-caches', [SettingsController::class, 'clearCaches'], [AuthMiddleware::class]);
 $router->post('/api/settings/clear-logs', [SettingsController::class, 'clearLogs'], [AuthMiddleware::class]);
 
