@@ -708,7 +708,7 @@ class FranchiseController extends Controller{
      * Generates a PDF from an Excel template for a specific franchise.
      */
     
-public function exportFranchiseForm(?string $id = null): void {
+    public function exportFranchiseForm(?string $id = null): void {
 
         $this->checkPermission(['Admin', 'Editor', 'Viewer']);
 
@@ -742,9 +742,19 @@ public function exportFranchiseForm(?string $id = null): void {
             return;
         }
 
+        $_years = 5;
+        $_word = 'FIVE';
+
         $franchiseNo = strtoupper((string)($franchise['FranchiseNo'] ?? ''));
         $dateIssued = !empty($lastHistory['DateIssued']) ? date('F j, Y', strtotime((string)$lastHistory['DateIssued'])) : '';
         $expiryDate = !empty($lastHistory['ExpiryDate']) ? date('F j, Y', strtotime((string)$lastHistory['ExpiryDate'])) : '';
+        
+        if($dateIssued != '' && $expiryDate != ''){
+            $_years = ceil(((int)date('Y', strtotime((string)$lastHistory['ExpiryDate'])) - (int)date('Y', strtotime((string)$lastHistory['DateIssued']))));
+        }
+
+        $_word = strtoupper($this->numberToWords($_years));
+        
         $applicantName = strtoupper((string)($franchise['ApplicantName'] ?? ''));
         $applicantGender = $this->normalizeGenderLabel($franchise['Gender'] ?? null);
         $address = strtoupper((string)($franchise['Address'] ?? ''));
@@ -881,7 +891,7 @@ public function exportFranchiseForm(?string $id = null): void {
                     <tr>
                         <td width="1%" style="border: none;font-weight: normal;font-size:11pt;text-align: left;padding:5px;vertical-align:top;">3.</td>
                         <td width="99%" style="border: none;font-weight: normal;font-size:11pt;text-align: left;padding:5px;vertical-align:top;">
-                            The authority shall be valid for <strong style="color: #003366;text-decoration: underline;">FIVE (5) YEARS</strong> or <strong style="color: #003366;">until '. strtoupper($expiryDateDisplay) .'</strong> which is counted from the date of first issuance.
+                            The authority shall be valid for <strong style="color: #003366;text-decoration: underline;">'.$_word.' ('.$_years.') YEARS</strong> or <strong style="color: #003366;">until '. strtoupper($expiryDateDisplay) .'</strong> which is counted from the date of issuance.
                         </td>
                     </tr>
                     <tr>
