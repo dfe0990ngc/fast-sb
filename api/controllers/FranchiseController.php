@@ -881,7 +881,7 @@ public function exportFranchiseForm(?string $id = null): void {
                     <tr>
                         <td width="1%" style="border: none;font-weight: normal;font-size:11pt;text-align: left;padding:5px;vertical-align:top;">3.</td>
                         <td width="99%" style="border: none;font-weight: normal;font-size:11pt;text-align: left;padding:5px;vertical-align:top;">
-                            The authority shall be valid for <strong style="color: #003366;text-decoration: underline;">FIVE (5) YEARS</strong> counted from the date of issuance.
+                            The authority shall be valid for <strong style="color: #003366;text-decoration: underline;">FIVE (5) YEARS</strong> or <strong style="color: #003366;">until '. strtoupper($expiryDateDisplay) .'</strong> which is counted from the date of first issuance.
                         </td>
                     </tr>
                     <tr>
@@ -960,10 +960,6 @@ public function exportFranchiseForm(?string $id = null): void {
                                 <tr>
                                     <td width="25%" style="border: none;font-weight: normal;font-size:8pt;text-align: left;">Date</td>
                                     <td width="75%" style="padding-left:5px;border: none;font-weight: normal;font-size:8pt;text-align: left;">:&nbsp;' . $dateIssuedDisplay . '</td>
-                                </tr>
-                                <tr>
-                                    <td width="25%" style="border: none;font-weight: normal;font-size:8pt;text-align: left;">Expire Date</td>
-                                    <td width="75%" style="padding-left:5px;border: none;font-weight: normal;font-size:8pt;text-align: left;">:&nbsp;' . $expiryDateDisplay . '</td>
                                 </tr>
                             </table>
                         </td>
@@ -3113,7 +3109,7 @@ public function exportFranchiseForm(?string $id = null): void {
             "SELECT 
                 f.*,
                 latestHistory.ExpiryDate as LatestExpiryDate,
-                CONCAT(a.FirstName,' ',a.LastName) as ApplicantName,
+                CONCAT(a.FirstName,IF(LENGTH(a.MiddleName) = 0,' ',CONCAT(' ',LEFT(a.MiddleName,1),'. ')),a.LastName) as ApplicantName,
                 a.Gender,
                 a.ContactNo,
                 a.Address,
