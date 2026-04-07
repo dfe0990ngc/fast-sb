@@ -117,10 +117,6 @@ class FranchiseController extends Controller{
 
         $params[] = $limit;
         $params[] = $offset;
-
-        // echo $_sql."\n";
-        // print_r($params);
-        // die();
         
         $franchises = Database::fetchAll($_sql, $params);
         
@@ -208,7 +204,6 @@ class FranchiseController extends Controller{
                 'CreatedBy' => $userID,
                 'UpdatedBy' => $userID,
                 'RenewalCount' => $RenewalCount,
-                // 'LastRenewalDate' => $data['LastRenewalDate'] ?? null,
             ]);
 
             $rm = "Initial franchise creation";
@@ -1059,6 +1054,19 @@ class FranchiseController extends Controller{
 
 
     public function exportExcel(): void {
+        // ---------------------------------------------------------------
+        // FIX: Kill every output buffer immediately — stray whitespace,
+        // PHP notices, or framework boot output prepended to the binary
+        // XLSX stream will corrupt the file before headers are sent.
+        // ---------------------------------------------------------------
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        // Suppress display of errors for this request; log them instead.
+        // Any echoed notice/warning will corrupt the binary stream.
+        ini_set('display_errors', '0');
+
         $this->checkPermission(['Admin', 'Editor', 'Viewer']);
 
         $status = strtolower(trim((string)($_GET['status'] ?? 'all')));
@@ -2187,9 +2195,6 @@ class FranchiseController extends Controller{
                 <th style="width:7%;">PLATE NO.</th>
             </tr></thead><tbody>',
         ]);
-                // after operator: <th style="width:4%;">GENDER</th>
-                // after date issued: <th style="width:7%;">EXPIRY DATE</th>
-                // after plate number: <th style="width:6%;">STATUS</th>
 
         if (empty($franchises)) {
             $pdf->WriteHTML('<tr><td colspan="13" style="text-align:center;">No franchise records found for the selected filter.</td></tr>');
@@ -2209,9 +2214,6 @@ class FranchiseController extends Controller{
                     <td>' . $this->escapePdfValue(strtoupper((string)($item['PlateNo'] ?? ''))) . '</td>
                 </tr>';
             }
-                    // <td style="text-align:center;">' . $this->escapePdfValue($this->normalizeGenderLabel($item['Gender'] ?? null)) . '</td>
-                    // <td style="text-align:center;">' . $this->escapePdfValue((string)(($item['ExpiryDate'] ?? '') === '0000-00-00' ? '' : ($item['ExpiryDate'] ?? ''))) . '</td>
-                    // <td style="text-align:center;">' . $this->escapePdfValue($this->formatStatusLabel((string)($item['Status'] ?? ''), $item['ExpiryDate'] ?? null, true)) . '</td>
 
             $this->writeTableRowsInChunks($pdf, $rowHtml, 100);
         }
@@ -2352,8 +2354,6 @@ class FranchiseController extends Controller{
 
     private function generatePerHolderSummaryPDF(array $rows, ?string $startDate = null, ?string $endDate = null): void {
         $totalHolders = count($rows);
-        // $title = 'PER HOLDER SUMMARY OF ACTIVE FRANCHISES (TOTAL ACTIVE FRANCHISE HOLDERS: ' . $totalHolders . ')';
-        
         $totalActiveUnits = array_sum(array_map(static fn ($row) => (int)($row['ActiveUnitCount'] ?? 0), $rows));
         $title = 'PER HOLDER SUMMARY OF ACTIVE FRANCHISES (TOTAL FRANCHISES: ' . $totalActiveUnits . ')';
         $dateFilterLabel = $this->buildOptionalDateRangeLabel($startDate, $endDate, 'All');
@@ -2364,7 +2364,6 @@ class FranchiseController extends Controller{
         $this->writeHtmlChunks($pdf, [
             $this->getSharedReportStyles(),
             '<p class="report-title">' . htmlspecialchars($title) . '</p>',
-            // '<p class="meta">Total Active Units: ' . $totalActiveUnits . ' | Date Filter: ' . htmlspecialchars($dateFilterLabel) . '</p>',
             '<p class="meta">Date Filter: ' . htmlspecialchars($dateFilterLabel) . ' | ' . htmlspecialchars($genderSummary) . '</p>',
             '<table><thead><tr>
                 <th style="width:3%;">#</th>
@@ -2803,22 +2802,51 @@ class FranchiseController extends Controller{
         }
     }
 
+    /**
+     * Streams an Excel workbook to the browser as a downloadable .xlsx file.
+     *
+     * IMPORTANT: This method saves the workbook to a temporary file first, then
+     * streams it with readfile(). Writing directly to php://output can interleave
+     * with previously buffered content and corrupt the ZIP-based XLSX binary.
+     * The temp-file approach fully separates generation from streaming, ensuring
+     * a clean byte sequence with an accurate Content-Length header.
+     */
     private function streamExcelOutput(Spreadsheet $spreadsheet, string $fileName): void {
-        if (function_exists('ob_get_level')) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
+        // Kill every output buffer — any stray byte prepended to the stream
+        // (whitespace, PHP notices, framework boot output) corrupts the XLSX file.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        // Write to a temp file first; streaming directly to php://output risks
+        // interleaving with buffered content and producing a corrupted download.
+        $tempFile = tempnam(sys_get_temp_dir(), 'xlsx_');
+
+        try {
+            $writer = new Xlsx($spreadsheet);
+            $writer->setPreCalculateFormulas(false);
+            $writer->save($tempFile);
+
+            // Release memory before streaming
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet, $writer);
+
+            if (!headers_sent()) {
+                header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                header('Content-Disposition: attachment; filename="' . $fileName . '"');
+                header('Content-Length: ' . filesize($tempFile));
+                header('Cache-Control: max-age=0, private, must-revalidate');
+                header('Pragma: public');
+            }
+
+            readfile($tempFile);
+        } finally {
+            // Always clean up the temp file, even if an error occurred
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
             }
         }
 
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment; filename="' . $fileName . '"');
-        header('Cache-Control: max-age=0, private, must-revalidate');
-        header('Pragma: public');
-
-        $writer = new Xlsx($spreadsheet);
-        $writer->setPreCalculateFormulas(false);
-        $writer->save('php://output');
-        $spreadsheet->disconnectWorksheets();
         exit;
     }
 
